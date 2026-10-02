@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-label="Handovr.ai">
+  <line x1="34" y1="77" x2="64" y2="39" stroke="#0070E0" stroke-width="14" stroke-linecap="round"/>
+  <line x1="16" y1="59" x2="34" y2="77" stroke="#001C64" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="79.5" cy="19.4" r="13" fill="#FFC439"/>
+</svg>
