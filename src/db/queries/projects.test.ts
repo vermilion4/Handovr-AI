@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { seedDemo } from '../seed-data';
 import type { Db } from '../schema';
 import { createTestDb } from '../test-db';
+import { getContract, signMilestones } from './contract';
 import { listProjectsForUser } from './projects';
 
 let db: Db;
@@ -54,5 +55,26 @@ describe('listProjectsForUser', () => {
 
   it('returns an empty list for a person with no projects', async () => {
     expect(await listProjectsForUser(db, people.lonelyId)).toEqual([]);
+  });
+
+  it('says what each drafting milestone needs from the viewer', async () => {
+    const portal = async (userId: string) =>
+      (await listProjectsForUser(db, userId)).find((p) => p.title === 'Wholesale order portal')!.milestones.map((m) => m.contract);
+    expect(await portal(people.mayaId)).toEqual(['changes_suggested', 'ready_to_sign']);
+    expect(await portal(people.tomasId)).toEqual(['ready_to_sign', 'ready_to_sign']);
+
+    const bakery = (await listProjectsForUser(db, people.mayaId)).find((p) => p.title === "Chen's Bakery website")!;
+    expect(bakery.milestones.map((m) => m.contract)).toEqual(['signed', 'signed', 'ready_to_sign']);
+  });
+
+  it('shows a signer that they have signed and the other side that it is their turn', async () => {
+    const project = (await listProjectsForUser(db, people.mayaId)).find((p) => p.title === 'Wholesale order portal')!;
+    const history = (await getContract(db, project.id, people.mayaId))!.milestones[1];
+    await signMilestones(db, { projectId: project.id, userId: people.tomasId, versionIds: [history.version!.id], typedName: 'Tomas Rivera', agreed: true, now: new Date() });
+
+    const contractFor = async (userId: string) =>
+      (await listProjectsForUser(db, userId)).find((p) => p.id === project.id)!.milestones[1].contract;
+    expect(await contractFor(people.tomasId)).toBe('signed_by_viewer');
+    expect(await contractFor(people.mayaId)).toBe('ready_to_sign');
   });
 });

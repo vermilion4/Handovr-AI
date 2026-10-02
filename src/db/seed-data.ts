@@ -1,5 +1,8 @@
+import { randomUUID } from 'node:crypto';
+import type { CriterionCategory, CriterionKind } from '../domain/criteria';
 import type { MilestoneState } from '../domain/milestone-state';
-import { milestones, projects, users, type Db } from './schema';
+import { allocateShares } from '../domain/shares';
+import { criteria, criteriaVersions, milestones, projects, signatures, users, type Db } from './schema';
 
 export const DEMO_CLIENT_EMAIL = 'maya@chensbakery.example';
 export const DEMO_FREELANCER_EMAIL = 'tomas@riverastudio.example';
@@ -87,6 +90,61 @@ const PROJECTS: ProjectSeed[] = [
   },
 ];
 
+type Check = [description: string, testPlan: string, kind: CriterionKind, category: CriterionCategory | null, weight: number];
+
+const CHECKS: Check[] = [
+  ['Everything the brief asks for works', 'Each feature in the brief is used once and behaves as described.', 'machine', 'function', 3],
+  ['The page works at phone width', 'At 390 pixels wide, nothing overflows and every control can be used.', 'machine', 'responsive', 3],
+  ['The page loads in under 3 seconds', 'Measured on a fresh visit, three times, taking the middle result.', 'machine', 'performance', 2],
+  ['No links on the page are broken', 'Every link is opened and must load a real page.', 'machine', 'function', 2],
+  ['The page matches the look of the rest of the site', 'A test cannot judge this, so the client will.', 'human', null, 2],
+];
+
+const CHANGED_SPEED: Check = [
+  'The page loads in under 4 seconds on a phone connection',
+  'Measured on a simulated 4G phone connection, three times, taking the middle result.',
+  'machine',
+  'performance',
+  9,
+];
+const ADDED_CHECK: Check = [
+  'The account page shows the customer name',
+  'After logging in with the test account, the account page shows that account’s name.',
+  'machine',
+  'content',
+  5,
+];
+
+async function insertList(
+  db: Db,
+  milestoneId: string,
+  amountCents: number,
+  version: number,
+  authorId: string | null,
+  reason: string,
+  checks: Check[],
+  keys: string[],
+): Promise<string> {
+  const [row] = await db
+    .insert(criteriaVersions)
+    .values({ milestoneId, version, authorId, reason })
+    .returning({ id: criteriaVersions.id });
+  const shares = allocateShares(amountCents, checks.map((check) => check[4]));
+  await db.insert(criteria).values(
+    checks.map(([description, testPlan, kind, category], index) => ({
+      versionId: row.id,
+      key: keys[index],
+      position: index + 1,
+      description,
+      testPlan,
+      kind,
+      category,
+      shareCents: shares[index],
+    })),
+  );
+  return row.id;
+}
+
 export async function seedDemo(db: Db): Promise<{ mayaId: string; tomasId: string; lonelyId: string }> {
   const ids = new Map<string, string>();
   for (const [key, name, email, role] of PEOPLE) {
@@ -106,16 +164,49 @@ export async function seedDemo(db: Db): Promise<{ mayaId: string; tomasId: strin
       })
       .returning({ id: projects.id });
 
-    await db.insert(milestones).values(
-      project.milestones.map(([title, amountCents, state, criteriaDraft], index) => ({
-        projectId: row.id,
-        position: index + 1,
-        title,
-        amountCents,
-        state,
-        criteriaDraft,
-      })),
-    );
+    const milestoneRows = await db
+      .insert(milestones)
+      .values(
+        project.milestones.map(([title, amountCents, state, criteriaDraft], index) => ({
+          projectId: row.id,
+          position: index + 1,
+          title,
+          amountCents,
+          state,
+          criteriaDraft,
+        })),
+      )
+      .returning();
+
+    for (const milestone of milestoneRows) {
+      if (milestone.criteriaDraft !== 'ready') continue;
+      const keys = CHECKS.map(() => randomUUID());
+      const versionId = await insertList(db, milestone.id, milestone.amountCents, 1, null, '', CHECKS, keys);
+
+      if (milestone.state !== 'drafting') {
+        await db.insert(signatures).values(
+          [project.client, project.freelancer].map((key) => {
+            const [, name, email] = PEOPLE.find((person) => person[0] === key)!;
+            return { versionId, userId: ids.get(key)!, signedName: name, signedEmail: email };
+          }),
+        );
+      }
+
+      if (project.title === 'Wholesale order portal' && milestone.position === 1) {
+        const [works, phone, , links, look] = CHECKS;
+        const reweigh = (check: Check, weight: number): Check => [check[0], check[1], check[2], check[3], weight];
+        await insertList(
+          db,
+          milestone.id,
+          milestone.amountCents,
+          2,
+          ids.get('tomas')!,
+          'Order history pulls a lot of data, so 3 seconds is tight on mobile. I also added a check that the account page shows the right customer.',
+          [reweigh(works, 14), reweigh(phone, 14), CHANGED_SPEED, reweigh(links, 9), ADDED_CHECK, reweigh(look, 9)],
+          [keys[0], keys[1], keys[2], keys[3], randomUUID(), keys[4]],
+        );
+      }
+    }
   }
 
   return { mayaId: ids.get('maya')!, tomasId: ids.get('tomas')!, lonelyId: ids.get('lonely')! };

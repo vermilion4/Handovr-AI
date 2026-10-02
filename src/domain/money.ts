@@ -8,3 +8,11 @@ export function formatMoney(cents: number): string {
   }
   return formatter.format(cents / 100);
 }
+
+export function parseAmount(text: string): number | null {
+  const cleaned = text.trim().replace(/^\$/, '').replace(/,/g, '');
+  if (!/^\d{1,9}(\.\d{1,2})?$/.test(cleaned)) return null;
+  const [dollars, decimals = ''] = cleaned.split('.');
+  const cents = Number(dollars) * 100 + Number(decimals.padEnd(2, '0'));
+  return cents > 0 ? cents : null;
+}
