@@ -12,8 +12,11 @@ const POINTS = [
   ['smart_toy', 'An AI tester checks the finished site against the list'],
 ] as const;
 
-export default async function SignInPage() {
+export default async function SignInPage({
+  searchParams,
+}: Readonly<{ searchParams: Promise<{ error?: string }> }>) {
   if (await getCurrentUser()) redirect('/projects');
+  const { error } = await searchParams;
 
   return (
     <main className="grid min-h-screen bg-white md:grid-cols-[4fr_5fr]">
@@ -40,8 +43,19 @@ export default async function SignInPage() {
       <section className="flex items-center px-6 py-10 md:px-[180px]">
         <div className="w-full max-w-[440px]">
           <h2 className="font-display text-[28px] font-medium md:text-4xl">Sign in</h2>
-          <p className="mt-3 text-muted">Look around with a demo account.</p>
-          <form action={signInAsDemo} className="mt-8 grid gap-4 md:grid-cols-2">
+          {error === 'paypal' && (
+            <p role="alert" className="mt-4 rounded-xl bg-fail/10 px-4 py-3 text-sm text-fail">
+              PayPal did not confirm the login. Try again, and use a PayPal account with a confirmed email.
+            </p>
+          )}
+          <a
+            href="/api/auth/paypal/start"
+            className="mt-8 flex h-12 items-center justify-center rounded-full bg-hold text-base font-semibold text-ink hover:bg-[#f2b400] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-paypal"
+          >
+            Log in with PayPal
+          </a>
+          <p className="mt-8 text-muted">Or look around with a demo account.</p>
+          <form action={signInAsDemo} className="mt-4 grid gap-4 md:grid-cols-2">
             <Button variant="secondary" type="submit" name="role" value="client" className="px-4! whitespace-nowrap text-[15px]">
               Continue as a client
             </Button>

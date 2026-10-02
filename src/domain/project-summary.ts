@@ -1,3 +1,4 @@
+import type { ContractStatus, DraftStatus } from './contract';
 import type { MilestoneState } from './milestone-state';
 import { formatMoney } from './money';
 
@@ -8,7 +9,9 @@ export interface SummaryMilestone {
   title: string;
   amountCents: number;
   state: MilestoneState;
-  criteriaDraft: 'pending' | 'ready';
+  criteriaDraft: DraftStatus;
+  /** What the list of checks needs from the viewer. Treated as ready to sign when absent. */
+  contract?: ContractStatus;
 }
 
 export interface SummaryInput {
@@ -65,9 +68,19 @@ function currentStatus(milestone: SummaryMilestone, role: Role, other: string): 
   const client = role === 'client';
   switch (milestone.state) {
     case 'drafting':
-      return milestone.criteriaDraft === 'pending'
-        ? { icon: 'smart_toy', text: 'Handovr is drafting the criteria', tone: 'progress', action: 'View progress' }
-        : { icon: 'edit', text: 'Criteria ready for you to sign', tone: 'attention', action: 'Sign criteria' };
+      if (milestone.criteriaDraft === 'failed') {
+        return { icon: 'error', text: 'Drafting stopped, open to try again', tone: 'attention', action: 'Open' };
+      }
+      if (milestone.criteriaDraft !== 'ready') {
+        return { icon: 'smart_toy', text: 'Handovr is drafting the criteria', tone: 'progress', action: 'View progress' };
+      }
+      if (milestone.contract === 'changes_suggested') {
+        return { icon: 'rate_review', text: `${other} suggested changes`, tone: 'attention', action: 'Review changes' };
+      }
+      if (milestone.contract === 'signed_by_viewer') {
+        return { icon: 'schedule', text: `You signed. Waiting for ${other} to sign`, tone: 'neutral', action: 'Open' };
+      }
+      return { icon: 'edit', text: 'Criteria ready for you to sign', tone: 'attention', action: 'Sign criteria' };
     case 'signed':
       return client
         ? { icon: 'lock', text: 'Ready for you to fund', tone: 'attention', action: 'Fund milestone' }
@@ -151,7 +164,7 @@ export function summariseProject(input: SummaryInput): ProjectSummary {
   }
 
   const status = currentStatus(current, role, other);
-  const draftingAll = current.state === 'drafting' && current.criteriaDraft === 'pending';
+  const draftingAll = current.state === 'drafting' && current.criteriaDraft !== 'ready';
 
   return {
     finished: false,

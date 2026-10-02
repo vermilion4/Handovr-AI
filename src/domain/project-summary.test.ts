@@ -119,4 +119,31 @@ describe('summariseProject', () => {
       actionLabel: 'Open',
     });
   });
+
+  it('tells both sides when drafting stopped', () => {
+    const summary = summariseProject(input({ milestones: [m(1, 'Landing page', 70000, 'drafting', 'failed')] }));
+    expect(summary.status).toEqual({ icon: 'error', text: 'Drafting stopped, open to try again', tone: 'attention' });
+    expect(summary.actionLabel).toBe('Open');
+  });
+
+  it('treats a milestone being written as still drafting', () => {
+    const summary = summariseProject(input({ milestones: [m(1, 'Landing page', 70000, 'drafting', 'drafting')] }));
+    expect(summary.status.text).toBe('Handovr is drafting the criteria');
+    expect(summary.milestoneLabel).toBe('1 milestone');
+  });
+
+  it('tells the person who has signed that it is waiting for the other side', () => {
+    const signed = [{ ...m(1, 'Login page', 10000, 'drafting'), contract: 'signed_by_viewer' as const }];
+    const summary = summariseProject(input({ role: 'freelancer', counterpartName: 'Tony Client', milestones: signed }));
+    expect(summary.status).toEqual({ icon: 'schedule', text: 'You signed. Waiting for Tony to sign', tone: 'neutral' });
+    expect(summary.actionLabel).toBe('Open');
+    expect(summary.needsViewer).toBe(false);
+  });
+
+  it('tells a person when the other side changed the list', () => {
+    const changed = [{ ...m(1, 'Login page', 10000, 'drafting'), contract: 'changes_suggested' as const }];
+    const summary = summariseProject(input({ milestones: changed }));
+    expect(summary.status).toEqual({ icon: 'rate_review', text: 'Tomás suggested changes', tone: 'attention' });
+    expect(summary.actionLabel).toBe('Review changes');
+  });
 });

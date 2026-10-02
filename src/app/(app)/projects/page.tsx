@@ -63,9 +63,10 @@ export default async function ProjectsPage() {
 
   const projects = await listProjectsForUser(db, user.id);
   const rows: Row[] = projects.map((project) => {
-    const counterpart = user.role === 'client' ? project.freelancer : project.client;
+    const role = project.client.id === user.id ? 'client' : 'freelancer';
+    const counterpart = role === 'client' ? project.freelancer : project.client;
     const summary = summariseProject({
-      role: user.role,
+      role,
       counterpartName: counterpart.name,
       finishedAt: project.finishedAt,
       milestones: project.milestones,
@@ -73,7 +74,7 @@ export default async function ProjectsPage() {
     return {
       id: project.id,
       title: project.title,
-      withLabel: `${user.role === 'client' ? 'With' : 'For'} ${counterpart.name}`,
+      withLabel: `${role === 'client' ? 'With' : 'For'} ${counterpart.name}`,
       summary,
       heldCents: summary.segments.filter((s) => s.kind === 'held').reduce((t, s) => t + s.amountCents, 0),
     };
@@ -86,18 +87,22 @@ export default async function ProjectsPage() {
   const needing = active.filter((r) => r.summary.needsViewer).length;
   const plural = (n: number, one: string, many: string) => `${n === 1 ? 'One' : n} ${n === 1 ? one : many}`;
 
-  const overview =
-    heldTotal > 0
-      ? `${formatMoney(heldTotal)} is held${user.role === 'client' ? '' : ' for you'} across ${heldRows.length === 1 ? 'one project' : `${heldRows.length} projects`}. ` +
-        (needing > 0 ? `${plural(needing, 'needs', 'need')} you.` : 'Nothing needs you right now.')
-      : needing > 0
-        ? `${plural(needing, 'project needs', 'projects need')} you.`
-        : 'Nothing is held right now.';
+  const heldForYou = user.role === 'client' ? '' : ' for you';
+  const heldProjectLabel = heldRows.length === 1 ? 'one project' : `${heldRows.length} projects`;
+
+  let overview = 'Nothing is held right now.';
+  if (heldTotal > 0) {
+    const heldMessage = `${formatMoney(heldTotal)} is held${heldForYou} across ${heldProjectLabel}.`;
+    const needsMessage = needing > 0 ? `${plural(needing, 'needs', 'need')} you.` : 'Nothing needs you right now.';
+    overview = `${heldMessage} ${needsMessage}`;
+  } else if (needing > 0) {
+    overview = `${plural(needing, 'project needs', 'projects need')} you.`;
+  }
 
   return (
     <>
       <TopNav user={user} active="projects" />
-      <main className="mx-auto max-w-[1440px] px-4 pb-16 pt-6 md:px-24 md:pt-8">
+      <main className="mx-auto max-w-360 px-4 pb-16 pt-6 md:px-24 md:pt-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="font-display text-2xl font-medium md:text-[28px]">Projects</h1>

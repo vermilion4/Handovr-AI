@@ -1,6 +1,6 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { milestones, projects, schema, users } from './schema';
+import { criteria, criteriaVersions, milestones, projects, schema, signatures, users } from './schema';
 import { seedDemo } from './seed-data';
 import { assertSafeToSeed } from './seed-guard';
 
@@ -13,6 +13,9 @@ async function main(databaseUrl: string) {
   const db = drizzle({ client: sql, schema });
 
   // Empty the tables before loading the demo data.
+  await db.delete(signatures);
+  await db.delete(criteria);
+  await db.delete(criteriaVersions);
   await db.delete(milestones);
   await db.delete(projects);
   await db.delete(users);

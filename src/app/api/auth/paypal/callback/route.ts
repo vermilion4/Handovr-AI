@@ -1,31 +1,40 @@
-const BASE = 'https://api-m.sandbox.paypal.com';
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
+import { sessionSecret, startSession } from '@/auth/current-user';
+import { PAYPAL_STATE_COOKIE, fetchPayPalIdentity } from '@/auth/paypal-login';
+import { PENDING_SIGNUP_COOKIE, encodePendingSignup } from '@/auth/pending-signup';
+import { db } from '@/db/client';
+import { signInPayPalUser } from '@/db/queries/users';
 
-// Temporary probe: exchanges the login code and shows what PayPal returns.
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
+  const jar = await cookies();
+  const expectedState = jar.get(PAYPAL_STATE_COOKIE)?.value;
+  jar.delete(PAYPAL_STATE_COOKIE);
+
   const code = params.get('code');
-  if (!code) {
-    return Response.json({ error: params.get('error'), description: params.get('error_description') });
+  const clientId = process.env.PAYPAL_CLIENT_ID;
+  const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
+  if (!code || !expectedState || params.get('state') !== expectedState || !clientId || !clientSecret) {
+    redirect('/sign-in?error=paypal');
   }
 
-  const basic = Buffer.from(`${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`).toString('base64');
-  const tokenRes = await fetch(`${BASE}/v1/oauth2/token`, {
-    method: 'POST',
-    headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'authorization_code', code }),
-  });
-  const token = await tokenRes.json();
-  if (!token.access_token) {
-    return Response.json({ step: 'token', status: tokenRes.status, error: token.error, description: token.error_description });
+  const identity = await fetchPayPalIdentity({ code, clientId, clientSecret }).catch(() => null);
+  if (!identity) redirect('/sign-in?error=paypal');
+
+  const userId = await signInPayPalUser(db, identity);
+  if (userId) {
+    await startSession(userId);
+    redirect('/projects');
   }
 
-  const infoRes = await fetch(`${BASE}/v1/identity/openidconnect/userinfo?schema=openid`, {
-    headers: { Authorization: `Bearer ${token.access_token}` },
+  // Someone new: hold their PayPal identity until they say how they will use Handovr.
+  jar.set(PENDING_SIGNUP_COOKIE, encodePendingSignup(identity, sessionSecret()), {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: 900,
   });
-  return Response.json({
-    tokenFields: Object.keys(token),
-    scope: token.scope,
-    userinfoStatus: infoRes.status,
-    userinfo: await infoRes.json(),
-  });
+  redirect('/welcome');
 }
