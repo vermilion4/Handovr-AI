@@ -7,7 +7,7 @@ import { MoneyBar } from '@/components/money-bar';
 import { TopNav } from '@/components/top-nav';
 import { db } from '@/db/client';
 import { listProjectsForUser } from '@/db/queries/projects';
-import { formatUsd } from '@/domain/money';
+import { formatMoney } from '@/domain/money';
 import { summariseProject, type ProjectSummary } from '@/domain/project-summary';
 
 const toneClass: Record<ProjectSummary['status']['tone'], string> = {
@@ -88,7 +88,7 @@ export default async function ProjectsPage() {
 
   const overview =
     heldTotal > 0
-      ? `${formatUsd(heldTotal)} is held${user.role === 'client' ? '' : ' for you'} across ${heldRows.length === 1 ? 'one project' : `${heldRows.length} projects`}. ` +
+      ? `${formatMoney(heldTotal)} is held${user.role === 'client' ? '' : ' for you'} across ${heldRows.length === 1 ? 'one project' : `${heldRows.length} projects`}. ` +
         (needing > 0 ? `${plural(needing, 'needs', 'need')} you.` : 'Nothing needs you right now.')
       : needing > 0
         ? `${plural(needing, 'project needs', 'projects need')} you.`

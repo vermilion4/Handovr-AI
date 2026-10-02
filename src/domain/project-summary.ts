@@ -1,5 +1,5 @@
 import type { MilestoneState } from './milestone-state';
-import { formatUsd } from './money';
+import { formatMoney } from './money';
 
 export type Role = 'client' | 'freelancer';
 
@@ -101,14 +101,14 @@ function currentStatus(milestone: SummaryMilestone, role: Role, other: string): 
 
 function caption(role: Role, heldCents: number, releasedCents: number, totalCents: number, finished: boolean): string {
   const client = role === 'client';
-  const held = `${formatUsd(heldCents)} held${client ? '' : ' for you'}`;
-  const released = `${formatUsd(releasedCents)} ${client ? 'released' : 'paid'}`;
+  const held = `${formatMoney(heldCents)} held${client ? '' : ' for you'}`;
+  const released = `${formatMoney(releasedCents)} ${client ? 'released' : 'paid'}`;
   if (finished) return released;
   if (totalCents === 0) return 'Nothing held yet';
-  if (heldCents > 0 && releasedCents > 0) return `${held}, ${released} of ${formatUsd(totalCents)}`;
-  if (heldCents > 0) return `${held} of ${formatUsd(totalCents)}`;
-  if (releasedCents > 0) return `${released} of ${formatUsd(totalCents)}`;
-  return `Nothing held yet of ${formatUsd(totalCents)}`;
+  if (heldCents > 0 && releasedCents > 0) return `${held}, ${released} of ${formatMoney(totalCents)}`;
+  if (heldCents > 0) return `${held} of ${formatMoney(totalCents)}`;
+  if (releasedCents > 0) return `${released} of ${formatMoney(totalCents)}`;
+  return `Nothing held yet of ${formatMoney(totalCents)}`;
 }
 
 export function summariseProject(input: SummaryInput): ProjectSummary {

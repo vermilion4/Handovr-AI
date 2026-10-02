@@ -46,3 +46,6 @@ next-env.d.ts
 .superpowers/
 .pgdata/
 docs/
+# spike scratch state
+spikes/.state.json
+spikes/out/
