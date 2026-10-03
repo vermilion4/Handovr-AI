@@ -1,6 +1,7 @@
 import type { ContractStatus, DraftStatus } from './contract';
 import type { MilestoneState } from './milestone-state';
 import { formatMoney } from './money';
+import { paidCents } from './settlement';
 import { milestoneProgress, type Progress } from './progress';
 
 export type Role = 'client' | 'freelancer';
@@ -13,6 +14,8 @@ export interface SummaryMilestone {
   criteriaDraft: DraftStatus;
   /** What the list of checks needs from the viewer. Treated as ready to sign when absent. */
   contract?: ContractStatus;
+  /** The freelancer's share when a split was agreed. */
+  splitFreelancerCents?: number | null;
 }
 
 export interface SummaryInput {
@@ -138,8 +141,11 @@ export function summariseProject(input: SummaryInput): ProjectSummary {
   const other = input.counterpartName.split(' ')[0];
 
   const segments = milestones.map((m) => ({ amountCents: m.amountCents, kind: segmentKind(m.state) }));
-  const sum = (kind: 'released' | 'held') =>
-    segments.filter((s) => s.kind === kind).reduce((total, s) => total + s.amountCents, 0);
+  const held = milestones.filter((m) => segmentKind(m.state) === 'held').reduce((total, m) => total + m.amountCents, 0);
+  // A split pays only the freelancer's share, so that is what counts as released.
+  const released = milestones
+    .filter((m) => m.state === 'released')
+    .reduce((total, m) => total + paidCents({ amountCents: m.amountCents, splitFreelancerCents: m.splitFreelancerCents ?? null }), 0);
   const totalCents = milestones.reduce((total, m) => total + m.amountCents, 0);
 
   if (milestones.length === 0) {
@@ -168,7 +174,7 @@ export function summariseProject(input: SummaryInput): ProjectSummary {
       },
       segments,
       progress: milestoneProgress(milestones[milestones.length - 1].state),
-      caption: caption(role, 0, sum('released'), totalCents, true),
+      caption: caption(role, 0, released, totalCents, true),
       actionLabel: 'Open',
       needsViewer: false,
     };
@@ -185,7 +191,7 @@ export function summariseProject(input: SummaryInput): ProjectSummary {
     status: { icon: status.icon, text: status.text, tone: status.tone },
     segments,
     progress: milestoneProgress(current.state),
-    caption: caption(role, sum('held'), sum('released'), totalCents, false),
+    caption: caption(role, held, released, totalCents, false),
     actionLabel: status.action,
     needsViewer: status.tone === 'attention',
   };

@@ -182,6 +182,8 @@ export interface ContractMilestone {
   criteriaDraft: DraftStatus;
   criteriaDraftStartedAt: Date | null;
   version: ContractVersion | null;
+  /** The freelancer's share when a split was agreed. */
+  splitFreelancerCents: number | null;
 }
 
 export interface ContractView {
@@ -269,6 +271,7 @@ export async function getContract(db: Db, projectId: string, viewerId: string): 
         state: row.state,
         criteriaDraft: row.criteriaDraft,
         criteriaDraftStartedAt: row.criteriaDraftStartedAt,
+        splitFreelancerCents: row.splitFreelancerCents,
         version: latest
           ? {
               id: latest.id,

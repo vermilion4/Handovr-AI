@@ -15,7 +15,7 @@ To run a milestone yourself, sign in with PayPal using the two sandbox accounts 
 | Client | judge1@gmail.com | NQQAx*04 |
 | Freelancer | judge2@gmail.com | 1rNl^6fD |
 
-1. Sign in as the client and create a project. Use the freelancer's email above.
+1. Sign in as the client and create a new project. Use the freelancer's email above under "Who is doing the work?".
 2. Handovr drafts the checks. Read them, change anything, and sign. Sign in as the freelancer in another browser and sign too.
 3. As the client, fund the first milestone. PayPal holds the amount plus its fee.
 4. As the freelancer, submit `https://handovr-drxq.onrender.com/fixtures/good/index.html` to watch it pass, or `/fixtures/dead-form/index.html` to watch a check fail.

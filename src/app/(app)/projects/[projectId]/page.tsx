@@ -13,6 +13,7 @@ import { holdTotalCents } from '@/domain/hold';
 import { isUuid } from '@/domain/ids';
 import { isFinal, type MilestoneState } from '@/domain/milestone-state';
 import { formatMoney } from '@/domain/money';
+import { paidCents } from '@/domain/settlement';
 import { milestoneStatus, type ProjectSummary } from '@/domain/project-summary';
 import { timelineTasks } from '@/domain/timeline';
 import { Timeline } from './timeline';
@@ -28,7 +29,6 @@ const HELD: ReadonlySet<MilestoneState> = new Set([
 ]);
 const shortDate = new Intl.DateTimeFormat('en-CA', { day: 'numeric', month: 'short' });
 const UNFUNDED: ReadonlySet<MilestoneState> = new Set(['drafting', 'signed']);
-const RELEASED: ReadonlySet<MilestoneState> = new Set(['released']);
 
 const toneClass: Record<ProjectSummary['status']['tone'], string> = {
   attention: 'font-semibold text-ink',
@@ -93,6 +93,8 @@ export default async function ProjectPage({
 
   const sum = (states: ReadonlySet<MilestoneState>) =>
     contract.milestones.filter((m) => states.has(m.state)).reduce((total, m) => total + m.amountCents, 0);
+  // A split pays only the freelancer's share, so that is what counts as released.
+  const releasedCents = contract.milestones.filter((m) => m.state === 'released').reduce((total, m) => total + paidCents(m), 0);
   const next = rows.find((row) => row.href);
   const justFunded = contract.milestones.find((m) => m.id === funded && HELD.has(m.state));
   const count = contract.milestones.length;
@@ -132,7 +134,7 @@ export default async function ProjectPage({
 
         <dl className="mt-8 grid gap-6 sm:grid-cols-3 sm:gap-12 md:max-w-[760px]">
           <div>
-            <dd className="font-display text-[32px] font-medium text-paypal">{formatMoney(sum(RELEASED))}</dd>
+            <dd className="font-display text-[32px] font-medium text-paypal">{formatMoney(releasedCents)}</dd>
             <dt className="text-[13px] text-muted">{isClient ? 'Released' : 'Paid to you'}</dt>
           </div>
           <div>

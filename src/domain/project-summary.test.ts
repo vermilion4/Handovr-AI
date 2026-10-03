@@ -157,6 +157,14 @@ describe('summariseProject', () => {
   });
 });
 
+describe('summariseProject after a split', () => {
+  it("counts only the freelancer's share as paid", () => {
+    const split = { ...m(1, 'Contact', 10000, 'released'), splitFreelancerCents: 7500 };
+    expect(summariseProject(input({ role: 'freelancer', milestones: [split], finishedAt: new Date('2026-10-03T12:00:00Z') })).caption).toBe('$75.00 paid');
+    expect(summariseProject(input({ milestones: [split, m(2, 'Menu', 5000, 'funded')] })).caption).toBe('$50.00 held, $75.00 released of $150.00');
+  });
+});
+
 describe('milestoneStatus', () => {
   it('tells the client a signed milestone is theirs to fund, and the freelancer to wait', () => {
     const signed = m(2, 'Contact page', 60000, 'signed');
