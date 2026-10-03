@@ -34,10 +34,14 @@ const toneClass: Record<ProjectSummary['status']['tone'], string> = {
 };
 
 function actionHref(projectId: string, milestone: ContractMilestone, isClient: boolean): string | null {
+  const page = `/projects/${projectId}/milestones/${milestone.id}`;
   if (milestone.state === 'drafting') return `/projects/${projectId}/criteria`;
   if (isClient && (milestone.state === 'signed' || milestone.state === 'funding_problem')) {
     return `/projects/${projectId}/fund/${milestone.id}`;
   }
+  if (!isClient && (milestone.state === 'funded' || milestone.state === 'revision')) return page;
+  if (isClient && milestone.state === 'client_review') return page;
+  if (milestone.state === 'settlement_proposed') return page;
   return null;
 }
 
@@ -152,8 +156,9 @@ export default async function ProjectPage({
                 {status.text}
               </p>
               <div className="flex items-center gap-5 text-sm font-semibold text-paypal md:justify-end">
-                {milestone.state !== 'drafting' && (
-                  <Link href={`/projects/${contract.project.id}/criteria`}>View checks</Link>
+                {milestone.state === 'signed' && <Link href={`/projects/${contract.project.id}/criteria`}>View checks</Link>}
+                {milestone.state !== 'drafting' && milestone.state !== 'signed' && !href?.includes('/milestones/') && (
+                  <Link href={`/projects/${contract.project.id}/milestones/${milestone.id}`}>Open</Link>
                 )}
                 {href && <Link href={href}>{status.action}</Link>}
               </div>

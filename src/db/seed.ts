@@ -3,13 +3,16 @@ import postgres from 'postgres';
 import {
   criteria,
   criteriaVersions,
+  evidence,
   holds,
   milestones,
   paymentEvents,
   projects,
   schema,
   signatures,
+  submissions,
   users,
+  verdicts,
   webhookEvents,
 } from './schema';
 import { seedDemo } from './seed-data';
@@ -24,6 +27,9 @@ async function main(databaseUrl: string) {
   const db = drizzle({ client: sql, schema });
 
   // Empty the tables before loading the demo data.
+  await db.delete(evidence);
+  await db.delete(verdicts);
+  await db.delete(submissions);
   await db.delete(webhookEvents);
   await db.delete(paymentEvents);
   await db.delete(holds);

@@ -1,9 +1,10 @@
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
-import { boolean, integer, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import { boolean, customType, integer, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 import type { HoldStatus, PaymentStatus, PaymentType } from '../domain/payments';
 import type { DraftStatus } from '../domain/contract';
 import type { CriterionCategory, CriterionKind } from '../domain/criteria';
 import type { MilestoneState } from '../domain/milestone-state';
+import type { AiVerdict, ClientDecision } from '../domain/verification';
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -133,6 +134,62 @@ export const webhookEvents = pgTable('webhook_events', {
   receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+const bytes = customType<{ data: Uint8Array; driverData: Uint8Array }>({
+  dataType() {
+    return 'bytea';
+  },
+});
+
+export type SubmissionStatus = 'queued' | 'running' | 'passed' | 'failed' | 'unreachable';
+
+export const submissions = pgTable('submissions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  milestoneId: uuid('milestone_id').notNull().references(() => milestones.id),
+  /** 1 for the first submission of the milestone, then one higher each time. */
+  attempt: integer('attempt').notNull(),
+  url: text('url').notNull(),
+  repoUrl: text('repo_url'),
+  status: text('status').$type<SubmissionStatus>().notNull().default('queued'),
+  /** How many times a run has been started for this submission. */
+  tries: integer('tries').notNull().default(0),
+  /** Demo data only: never run. */
+  simulated: boolean('simulated').notNull().default(false),
+  currentCriterionId: uuid('current_criterion_id'),
+  progressNote: text('progress_note').notNull().default(''),
+  /** When the run last showed it was alive. */
+  heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
+  replayUrl: text('replay_url'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+});
+
+export const verdicts = pgTable(
+  'verdicts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    submissionId: uuid('submission_id').notNull().references(() => submissions.id),
+    criterionId: uuid('criterion_id').notNull().references(() => criteria.id),
+    source: text('source').$type<'ai' | 'client'>().notNull(),
+    verdict: text('verdict').$type<AiVerdict | ClientDecision>().notNull(),
+    summary: text('summary').notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [unique().on(table.submissionId, table.criterionId, table.source)],
+);
+
+export const evidence = pgTable('evidence', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  submissionId: uuid('submission_id').notNull().references(() => submissions.id),
+  /** Null for evidence about the whole run, such as the first screenshots. */
+  verdictId: uuid('verdict_id').references(() => verdicts.id),
+  kind: text('kind').$type<'screenshot' | 'note' | 'timing' | 'console'>().notNull(),
+  caption: text('caption').notNull().default(''),
+  text: text('text').notNull().default(''),
+  image: bytes('image'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const schema = {
   users,
   projects,
@@ -143,6 +200,9 @@ export const schema = {
   holds,
   paymentEvents,
   webhookEvents,
+  submissions,
+  verdicts,
+  evidence,
 };
 
 /** Either the app's Postgres connection or the in-memory test database. */

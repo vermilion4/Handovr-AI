@@ -1,7 +1,7 @@
 import { ButtonLink } from '@/components/button';
 import { Icon } from '@/components/icon';
 import type { ContractMilestone } from '@/db/queries/contract';
-import { AutoRefresh } from './auto-refresh';
+import { AutoRefresh } from '@/components/auto-refresh';
 import { RetryButton } from './retry-button';
 
 function rowStatus(milestone: ContractMilestone, active: boolean) {
