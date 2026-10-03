@@ -1,0 +1,50 @@
+services:
+  - type: web
+    name: handovr
+    runtime: node
+    plan: free
+    region: oregon
+    branch: staging
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
+    startCommand: pnpm db:deploy && pnpm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: handovr-db
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: TICK_SECRET
+        generateValue: true
+      - key: APP_URL
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: KERNEL_API_KEY
+        sync: false
+      - key: ZAPIER_MCP_URL
+        sync: false
+      - key: ZAPIER_EMAIL_TOOL
+        sync: false
+      - key: NOTIFY_INBOX
+        sync: false
+      - key: HANDOVR_MODEL
+        value: claude-sonnet-5-5
+      - key: REVIEW_WINDOW_SECONDS
+        value: "86400"
+
+databases:
+  - name: handovr-db
+    plan: basic-256mb
+    databaseName: handovr
+    user: handovr
+    region: oregon
