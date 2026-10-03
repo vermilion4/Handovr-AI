@@ -48,7 +48,11 @@ export function ReviewForm({
       setFeedback(
         result.released
           ? { tone: 'success', title: 'Payment released', message: `${amountText} is on its way to ${freelancerFirst}. It usually arrives within a minute.` }
-          : { tone: 'success', title: 'Sent back for changes', message: `${freelancerFirst} sees your reasons and can resubmit. This used one of the four attempts.` },
+          : result.settlement === 'proposed'
+            ? { tone: 'warning', title: 'A split is proposed', message: `That was the last attempt. Handovr has proposed paying for the checks that passed; you and ${freelancerFirst} each accept or decline it.` }
+            : result.settlement === 'cancelled'
+              ? { tone: 'warning', title: 'Milestone cancelled', message: 'That was the last attempt and no check passed, so the hold is returned to you and nothing is paid.' }
+              : { tone: 'success', title: 'Sent back for changes', message: `${freelancerFirst} sees your reasons and can resubmit. This used one of the four attempts.` },
       );
     });
   }

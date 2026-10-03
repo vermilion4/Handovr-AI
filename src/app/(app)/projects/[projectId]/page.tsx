@@ -7,12 +7,15 @@ import { AddressResultDialog } from '@/components/result-dialog';
 import { TopNav } from '@/components/top-nav';
 import { db } from '@/db/client';
 import { getContract, type ContractMilestone } from '@/db/queries/contract';
+import { recentActivity, timelineFacts } from '@/db/queries/projects';
 import { contractStatus } from '@/domain/contract';
 import { holdTotalCents } from '@/domain/hold';
 import { isUuid } from '@/domain/ids';
 import { isFinal, type MilestoneState } from '@/domain/milestone-state';
 import { formatMoney } from '@/domain/money';
 import { milestoneStatus, type ProjectSummary } from '@/domain/project-summary';
+import { timelineTasks } from '@/domain/timeline';
+import { Timeline } from './timeline';
 
 const HELD: ReadonlySet<MilestoneState> = new Set([
   'funded',
@@ -23,6 +26,7 @@ const HELD: ReadonlySet<MilestoneState> = new Set([
   'releasing',
   'funding_problem',
 ]);
+const shortDate = new Intl.DateTimeFormat('en-CA', { day: 'numeric', month: 'short' });
 const UNFUNDED: ReadonlySet<MilestoneState> = new Set(['drafting', 'signed']);
 const RELEASED: ReadonlySet<MilestoneState> = new Set(['released']);
 
@@ -57,6 +61,9 @@ export default async function ProjectPage({
   const contract = isUuid(projectId) ? await getContract(db, projectId, user.id) : null;
   if (!contract) notFound();
 
+  const activity = await recentActivity(db, contract.project.id, user.id);
+  const facts = await timelineFacts(db, contract.project.id);
+  const timeline = timelineTasks(facts.milestones, facts.projectStart, new Date());
   const isClient = contract.viewerRole === 'client';
   const other = isClient ? contract.freelancer : contract.client;
   const otherFirst = other.name.split(' ')[0];
@@ -141,6 +148,13 @@ export default async function ProjectPage({
           </div>
         </dl>
 
+        <section className="mt-8 min-w-0 overflow-x-auto rounded-2xl bg-white p-5 md:p-8">
+          <h2 className="font-semibold">Timeline</h2>
+          <div className="mt-4 min-w-[560px]">
+            <Timeline tasks={timeline.tasks} dependencies={timeline.dependencies} />
+          </div>
+        </section>
+
         <ol className="mt-8 divide-y divide-line rounded-2xl bg-white px-5 md:px-8">
           {rows.map(({ milestone, status, href }) => (
             <li key={milestone.id} className="grid gap-x-6 gap-y-2 py-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_220px] md:items-center">
@@ -165,6 +179,20 @@ export default async function ProjectPage({
             </li>
           ))}
         </ol>
+
+        {activity.length > 0 && (
+          <section className="mt-8 rounded-2xl bg-white p-5 md:p-8">
+            <h2 className="font-semibold">Recent activity</h2>
+            <ul className="mt-4 space-y-3 text-sm">
+              {activity.map((item) => (
+                <li key={item.id} className="flex gap-4">
+                  <span className="w-16 shrink-0 text-muted">{shortDate.format(item.at)}</span>
+                  <span>{item.subject}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </main>
     </>
   );

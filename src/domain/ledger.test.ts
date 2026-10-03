@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ledgerCsv, ledgerRows, ledgerTotals, type LedgerEvent } from './ledger';
+import { ledgerByWeek, ledgerCsv, ledgerRows, ledgerTotals, type LedgerEvent } from './ledger';
 
 const at = (day: number) => new Date(Date.UTC(2026, 9, day, 12));
 const event = (over: Partial<LedgerEvent>): LedgerEvent => ({
@@ -96,5 +96,50 @@ describe('ledgerCsv', () => {
   it('quotes commas and quotes, and defuses cells a spreadsheet would run as a formula', () => {
     const rows = ledgerRows([event({ projectTitle: 'Shop, "phase 2"', milestoneTitle: '=SUM(A1:A9)' })], 'client');
     expect(ledgerCsv(rows).split('\r\n')[1]).toBe('2026-10-01,"Shop, ""phase 2""",\'=SUM(A1:A9),Hold placed,618.23,AUTH-1');
+  });
+});
+
+describe('ledgerByWeek', () => {
+  const at = (iso: string, type: LedgerEvent['type'], amountCents: number, status: LedgerEvent['status'] = 'completed'): LedgerEvent => ({
+    id: `${iso}-${type}`,
+    at: new Date(iso),
+    projectTitle: 'P',
+    milestoneTitle: 'M',
+    counterpartName: 'Tomás Rivera',
+    type,
+    status,
+    amountCents,
+    holdAmountCents: 60000,
+    paypalId: null,
+    detail: '',
+  });
+
+  it('totals completed holds, payouts and cancellations by week starting Monday, without gaps', () => {
+    const events = [
+      at('2026-10-05T10:00:00Z', 'hold', 61823),
+      at('2026-10-08T10:00:00Z', 'payout', 60000),
+      at('2026-10-21T10:00:00Z', 'hold', 10330),
+      at('2026-10-22T10:00:00Z', 'void', 10330),
+      at('2026-10-22T11:00:00Z', 'payout', 5000, 'failed'),
+    ];
+    expect(ledgerByWeek(events, 'client')).toEqual([
+      { weekStart: '2026-10-05', heldCents: 61823, releasedCents: 60000, returnedCents: 0 },
+      { weekStart: '2026-10-12', heldCents: 0, releasedCents: 0, returnedCents: 0 },
+      { weekStart: '2026-10-19', heldCents: 10330, releasedCents: 0, returnedCents: 10330 },
+    ]);
+  });
+
+  it('shows the freelancer the milestone amount held and no cancellations', () => {
+    expect(ledgerByWeek([at('2026-10-06T10:00:00Z', 'hold', 61823), at('2026-10-06T12:00:00Z', 'void', 61823)], 'freelancer')).toEqual([
+      { weekStart: '2026-10-05', heldCents: 60000, releasedCents: 0, returnedCents: 0 },
+    ]);
+  });
+
+  it('puts a Sunday in the week that began the Monday before', () => {
+    expect(ledgerByWeek([at('2026-10-11T23:00:00Z', 'payout', 100)], 'client')[0].weekStart).toBe('2026-10-05');
+  });
+
+  it('is empty with no events', () => {
+    expect(ledgerByWeek([], 'client')).toEqual([]);
   });
 });

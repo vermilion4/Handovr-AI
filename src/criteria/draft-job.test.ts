@@ -41,6 +41,31 @@ beforeEach(async () => {
 const statuses = async () => (await getContract(db, projectId, mayaId))!.milestones.map((m) => m.criteriaDraft);
 
 describe('draftProject', () => {
+  it('says once when every list in the project is ready', async () => {
+    const ready: string[] = [];
+    await draftProject(db, { generate: async () => answer }, projectId, undefined, async (milestoneId) => {
+      ready.push(milestoneId);
+    });
+    const [home] = (await getContract(db, projectId, mayaId))!.milestones;
+    expect(ready).toEqual([home.id]);
+  });
+
+  it('does not say the lists are ready while one failed', async () => {
+    const ready: string[] = [];
+    let calls = 0;
+    const flaky: StructuredModel = {
+      generate: async () => {
+        calls += 1;
+        if (calls <= 2) throw new Error('overloaded');
+        return answer;
+      },
+    };
+    await draftProject(db, flaky, projectId, undefined, async (milestoneId) => {
+      ready.push(milestoneId);
+    });
+    expect(ready).toEqual([]);
+  });
+
   it('drafts every queued milestone', async () => {
     const model: StructuredModel = { generate: async () => answer };
     await draftProject(db, model, projectId);

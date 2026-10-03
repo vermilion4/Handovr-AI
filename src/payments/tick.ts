@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import { holds, paymentEvents, type Db } from '../db/schema';
 import { holdAction } from '../domain/hold';
+import { noNotice, type Notice } from '../notifications/notice';
 import { GatewayError, type PaymentGateway } from './gateway';
 import { applyEvent } from './milestone-events';
 import { checkPayouts, processPayments, requeueStuck, retryFailedPayouts } from './processor';
@@ -87,7 +88,7 @@ async function expire(db: Db, hold: Hold, now: Date): Promise<boolean> {
   });
 }
 
-export async function runTick(db: Db, gateway: PaymentGateway, now: Date): Promise<TickReport> {
+export async function runTick(db: Db, gateway: PaymentGateway, now: Date, notice: Notice = noNotice): Promise<TickReport> {
   const report: TickReport = { renewed: 0, expired: 0, errors: [] };
   const step = async (name: string, run: () => Promise<void>) => {
     try {
@@ -99,11 +100,11 @@ export async function runTick(db: Db, gateway: PaymentGateway, now: Date): Promi
   };
 
   await step('requeue', () => requeueStuck(db, now));
-  await step('send', () => processPayments(db, gateway, now));
-  await step('payouts', () => checkPayouts(db, gateway, now));
+  await step('send', () => processPayments(db, gateway, now, notice));
+  await step('payouts', () => checkPayouts(db, gateway, now, notice));
   await step('retry', async () => {
     await retryFailedPayouts(db, now);
-    await processPayments(db, gateway, now);
+    await processPayments(db, gateway, now, notice);
   });
 
   const live = await db
@@ -120,7 +121,10 @@ export async function runTick(db: Db, gateway: PaymentGateway, now: Date): Promi
     }
     if (action === 'expire') {
       await step('expire', async () => {
-        if (await expire(db, hold, now)) report.expired += 1;
+        if (await expire(db, hold, now)) {
+          report.expired += 1;
+          await notice('cancelled', hold.milestoneId);
+        }
       });
     }
   }

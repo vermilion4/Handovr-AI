@@ -36,6 +36,34 @@
       "when": 1790989668670,
       "tag": "0004_black_xorn",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790998641282,
+      "tag": "0005_demonic_power_pack",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790999074611,
+      "tag": "0006_rare_thunderball",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790999220165,
+      "tag": "0007_steep_kabuki",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790999954245,
+      "tag": "0008_jittery_boomerang",
+      "breakpoints": true
     }
   ]
 }

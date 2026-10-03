@@ -3,6 +3,7 @@ import { holds, paymentEvents, webhookEvents, type Db } from '../db/schema';
 import type { PaymentGateway } from './gateway';
 import { applyEvent } from './milestone-events';
 import { checkPayouts } from './processor';
+import { noNotice, type Notice } from '../notifications/notice';
 
 type Outcome = 'rejected' | 'duplicate' | 'handled' | 'ignored';
 
@@ -35,6 +36,7 @@ export async function handleWebhook(
   db: Db,
   gateway: PaymentGateway,
   input: { headers: Headers; body: string; now: Date },
+  notice: Notice = noNotice,
 ): Promise<Outcome> {
   let event: { id?: unknown; event_type?: unknown; resource?: { id?: unknown } };
   try {
@@ -54,7 +56,7 @@ export async function handleWebhook(
 
   try {
     if (event.event_type.startsWith('PAYMENT.PAYOUTS')) {
-      await checkPayouts(db, gateway, input.now);
+      await checkPayouts(db, gateway, input.now, notice);
       return 'handled';
     }
     if (event.event_type === 'PAYMENT.AUTHORIZATION.VOIDED' && typeof event.resource?.id === 'string') {

@@ -9,6 +9,7 @@ import {
   milestones,
   paymentEvents,
   projects,
+  settlements,
   submissions,
   users,
   verdicts,
@@ -30,6 +31,12 @@ export interface MilestoneView {
     state: MilestoneState;
     attemptsUsed: number;
     reviewDueAt: Date | null;
+    releaseKind: 'full' | 'split' | null;
+    splitFreelancerCents: number | null;
+    /** The copy that starts this milestone again, if there is one. */
+    restartedAs: string | null;
+    /** The position of the milestone this one starts again. */
+    restartedFromPosition: number | null;
   };
   milestoneCount: number;
   criteria: Array<CriterionFields & { id: string }>;
@@ -55,6 +62,15 @@ export interface MilestoneView {
     hasImage: boolean;
   }>;
   payments: Array<{ type: PaymentType; status: PaymentStatus; amountCents: number; at: Date }>;
+  settlement: null | {
+    freelancerCents: number;
+    clientCents: number;
+    explanation: string;
+    clientResponse: 'accepted' | 'declined' | null;
+    freelancerResponse: 'accepted' | 'declined' | null;
+    outcome: 'pending' | 'accepted' | 'declined' | 'timed_out' | 'cancelled';
+    dueAt: Date;
+  };
 }
 
 export async function getMilestoneView(
@@ -118,6 +134,20 @@ export async function getMilestoneView(
         .where(eq(evidence.submissionId, tested.id))
         .orderBy(asc(evidence.createdAt))
     : [];
+  const [restartedAs] = await db
+    .select({ id: milestones.id })
+    .from(milestones)
+    .where(eq(milestones.restartedFromId, milestone.id))
+    .limit(1);
+  const [restartedFrom] = milestone.restartedFromId
+    ? await db.select({ position: milestones.position }).from(milestones).where(eq(milestones.id, milestone.restartedFromId))
+    : [];
+  const [settlement] = await db
+    .select()
+    .from(settlements)
+    .where(eq(settlements.milestoneId, milestone.id))
+    .orderBy(desc(settlements.createdAt))
+    .limit(1);
   const paymentRows = await db
     .select()
     .from(paymentEvents)
@@ -137,6 +167,10 @@ export async function getMilestoneView(
       state: milestone.state,
       attemptsUsed: milestone.attemptsUsed,
       reviewDueAt: milestone.reviewDueAt,
+      releaseKind: milestone.releaseKind,
+      splitFreelancerCents: milestone.splitFreelancerCents,
+      restartedAs: restartedAs?.id ?? null,
+      restartedFromPosition: restartedFrom?.position ?? null,
     },
     milestoneCount: count,
     criteria: criteriaRows.map((check) => ({
@@ -176,5 +210,16 @@ export async function getMilestoneView(
       amountCents: payment.amountCents,
       at: payment.updatedAt,
     })),
+    settlement: settlement
+      ? {
+          freelancerCents: settlement.freelancerCents,
+          clientCents: settlement.clientCents,
+          explanation: settlement.explanation,
+          clientResponse: settlement.clientResponse,
+          freelancerResponse: settlement.freelancerResponse,
+          outcome: settlement.outcome,
+          dueAt: settlement.dueAt,
+        }
+      : null,
   };
 }

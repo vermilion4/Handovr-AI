@@ -241,7 +241,7 @@ describe('declineVersion', () => {
 describe('signMilestones', () => {
   it('records the signer, the typed name and the email against each list', async () => {
     const [home, contact] = await milestonesNow();
-    expect(await sign(mayaId, [home.version!.id, contact.version!.id], 'maya chen')).toEqual({ ok: true, signed: 2, completed: 0 });
+    expect(await sign(mayaId, [home.version!.id, contact.version!.id], 'maya chen')).toEqual({ ok: true, signed: 2, completed: 0, completedIds: [] });
 
     const rows = await db.select().from(signatures).where(eq(signatures.userId, mayaId));
     expect(rows).toHaveLength(2);
@@ -252,7 +252,7 @@ describe('signMilestones', () => {
   it('moves a milestone to signed once both have signed the same list', async () => {
     const [home, contact] = await milestonesNow();
     await sign(mayaId, [home.version!.id, contact.version!.id], 'Maya Chen');
-    expect(await sign(tomasId, [home.version!.id], 'Tomás Rivera')).toEqual({ ok: true, signed: 1, completed: 1 });
+    expect(await sign(tomasId, [home.version!.id], 'Tomás Rivera')).toEqual({ ok: true, signed: 1, completed: 1, completedIds: [home.id] });
     expect((await milestonesNow()).map((m) => m.state)).toEqual(['signed', 'drafting']);
   });
 
@@ -301,7 +301,7 @@ describe('signMilestones', () => {
     expect(await sign(tomasId, [versionId], 'Tomás Rivera')).toMatchObject({ ok: true });
 
     await acknowledgeVersion(db, { versionId, userId: mayaId, now });
-    expect(await sign(mayaId, [versionId], 'Maya Chen')).toEqual({ ok: true, signed: 1, completed: 1 });
+    expect(await sign(mayaId, [versionId], 'Maya Chen')).toEqual({ ok: true, signed: 1, completed: 1, completedIds: [home.id] });
   });
 
   it('refuses someone who is not on the project, and a list from another project', async () => {

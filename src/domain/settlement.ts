@@ -1,3 +1,6 @@
+import { formatMoney } from './money';
+import type { AiVerdict, ClientDecision } from './verification';
+
 export interface CriterionOutcome {
   /** A positive whole number. */
   weight: number;
@@ -41,4 +44,53 @@ export function proposeSplit(amountCents: number, criteria: CriterionOutcome[]):
     approvedWeight,
     decidedWeight,
   };
+}
+
+export type FinalOutcome = 'approved' | 'failed' | 'undecided';
+
+export function finalOutcome(ai: AiVerdict | null, client: ClientDecision | null): FinalOutcome {
+  if (client) return client === 'approved' ? 'approved' : 'failed';
+  if (ai === 'pass') return 'approved';
+  if (ai === 'fail') return 'failed';
+  return 'undecided';
+}
+
+export interface SettlementCheck {
+  description: string;
+  shareCents: number;
+  outcome: FinalOutcome;
+}
+
+function joined(items: string[]): string {
+  return items.length <= 1 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
+}
+
+/** A plain account of a split, used until Claude's explanation replaces it and whenever Claude is unavailable. */
+export function explainSplit(amountCents: number, checks: SettlementCheck[], split: Split): string {
+  const decided = checks.filter((check) => check.outcome !== 'undecided');
+  const passed = decided.filter((check) => check.outcome === 'approved');
+  const failed = decided.filter((check) => check.outcome === 'failed');
+  const undecided = checks.filter((check) => check.outcome === 'undecided');
+  const whole = formatMoney(amountCents);
+
+  if (decided.length === 0) return `No check was decided, so nothing is paid and the full ${whole} goes back to the client.`;
+
+  const parts: string[] = [];
+  if (passed.length === 0) {
+    parts.push(`None of the ${decided.length} checks that were decided passed, so nothing is paid and the full ${whole} goes back to the client.`);
+  } else {
+    const percent = Math.round((split.approvedWeight * 100) / split.decidedWeight);
+    parts.push(
+      `${passed.length} of the ${decided.length} checks that were decided passed. They are worth ${formatMoney(split.approvedWeight)} of the ${formatMoney(split.decidedWeight)} that was decided, which is ${percent}%, so ${formatMoney(split.freelancerCents)} of the ${whole} goes to the freelancer and ${formatMoney(split.clientCents)} goes back to the client.`,
+    );
+  }
+  if (failed.length > 0) parts.push(`Not met: ${joined(failed.map((check) => check.description))}.`);
+  if (undecided.length === 1) parts.push(`${undecided[0].description} was never decided, so it is left out.`);
+  if (undecided.length > 1) parts.push(`${joined(undecided.map((check) => check.description))} were never decided, so they are left out.`);
+  return parts.join(' ');
+}
+
+/** What the freelancer is paid: the agreed share after a split, otherwise the whole milestone. */
+export function paidCents(milestone: { amountCents: number; splitFreelancerCents: number | null }): number {
+  return milestone.splitFreelancerCents ?? milestone.amountCents;
 }

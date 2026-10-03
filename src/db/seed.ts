@@ -1,14 +1,17 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import {
+  aiUsage,
   criteria,
   criteriaVersions,
   evidence,
   holds,
   milestones,
+  notifications,
   paymentEvents,
   projects,
   schema,
+  settlements,
   signatures,
   submissions,
   users,
@@ -27,6 +30,9 @@ async function main(databaseUrl: string) {
   const db = drizzle({ client: sql, schema });
 
   // Empty the tables before loading the demo data.
+  await db.delete(aiUsage);
+  await db.delete(notifications);
+  await db.delete(settlements);
   await db.delete(evidence);
   await db.delete(verdicts);
   await db.delete(submissions);

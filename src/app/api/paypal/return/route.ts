@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/auth/current-user';
 import { db } from '@/db/client';
 import { isUuid } from '@/domain/ids';
 import { confirmFunding } from '@/payments/funding';
+import { liveNotice, notifyLater } from '@/notifications/live';
 import { liveGateway } from '@/payments/live';
 import { processPayments } from '@/payments/processor';
 
@@ -17,7 +18,8 @@ export async function GET(request: Request) {
   const result = await confirmFunding(db, liveGateway(), { holdId, userId: user.id, now: new Date() });
   if (result.ok) {
     // A release that was waiting on this funding can go ahead now.
-    after(() => processPayments(db, liveGateway(), new Date()));
+    after(() => processPayments(db, liveGateway(), new Date(), liveNotice(db)));
+    notifyLater(db, { kind: 'funded', milestoneId: result.milestoneId, to: 'both' });
     redirect(`/projects/${result.projectId}?funded=${result.milestoneId}`);
   }
   if (!result.projectId || !result.milestoneId) redirect('/projects');

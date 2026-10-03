@@ -1,7 +1,8 @@
 import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { evidence, milestones, paymentEvents, submissions, verdicts, type Db } from '../db/schema';
+import { evidence, milestones, paymentEvents, settlements, submissions, verdicts, type Db } from '../db/schema';
 import { createTestDb } from '../db/test-db';
+import { recordingNotice } from '../notifications/notice';
 import type { BrowserTools } from './browser';
 import { applyEvent } from '../payments/milestone-events';
 import { runVerification, type VerificationDeps } from './run';
@@ -29,6 +30,7 @@ beforeEach(async () => {
 
 function deps(plan: Record<string, Array<'pass' | 'fail' | 'unclear'>>, browser: BrowserTools = fakeBrowser()) {
   const tester = scriptedTester(plan);
+  const notice = recordingNotice();
   let released = 0;
   const value: VerificationDeps = {
     openBrowser: async () => browser,
@@ -39,8 +41,10 @@ function deps(plan: Record<string, Array<'pass' | 'fail' | 'unclear'>>, browser:
     onRelease: async () => {
       released += 1;
     },
+    onSettlement: async () => undefined,
+    onNotify: notice,
   };
-  return { value, tester, released: () => released };
+  return { value, tester, released: () => released, told: notice.told };
 }
 
 const stateNow = async () => (await db.select().from(milestones).where(eq(milestones.id, fixture.milestoneId)))[0];
@@ -68,6 +72,7 @@ describe('runVerification', () => {
       'Phone, 390 pixels wide',
     ]);
     expect(run.released()).toBe(0);
+    expect(run.told).toEqual([['review_needed', fixture.milestoneId]]);
   });
 
   it('runs a failed check a second time and sends the work back when both runs fail', async () => {
@@ -76,6 +81,32 @@ describe('runVerification', () => {
     expect(run.tester.asked.filter((asked) => asked === FORM)).toHaveLength(2);
     expect((await aiVerdicts())[FORM]).toBe('fail');
     expect(await stateNow()).toMatchObject({ state: 'revision', attemptsUsed: 1 });
+    expect(run.told).toEqual([['sent_back', fixture.milestoneId]]);
+  });
+
+  it('writes the split when the fourth attempt fails', async () => {
+    await db.update(milestones).set({ attemptsUsed: 3 }).where(eq(milestones.id, fixture.milestoneId));
+    const run = deps({ [FORM]: ['fail', 'fail'], [PHONE]: ['pass'], [SPEED]: ['pass'] });
+    const proposed: string[] = [];
+    run.value.onSettlement = async (milestoneId) => {
+      proposed.push(milestoneId);
+    };
+    expect(await runVerification(db, run.value, submissionId)).toBe('failed');
+    expect((await stateNow()).state).toBe('settlement_proposed');
+    expect((await db.select().from(settlements))[0]).toMatchObject({ freelancerCents: 36000, clientCents: 24000 });
+    expect(proposed).toEqual([fixture.milestoneId]);
+    expect(run.released()).toBe(0);
+    expect(run.told).toEqual([['split_proposed', fixture.milestoneId]]);
+  });
+
+  it('cancels and returns the hold when the fourth attempt passes nothing', async () => {
+    await db.update(milestones).set({ attemptsUsed: 3 }).where(eq(milestones.id, fixture.milestoneId));
+    const run = deps({ [FORM]: ['fail', 'fail'], [PHONE]: ['fail', 'fail'], [SPEED]: ['fail', 'fail'] });
+    expect(await runVerification(db, run.value, submissionId)).toBe('failed');
+    expect((await stateNow()).state).toBe('cancelled');
+    expect((await db.select().from(settlements))[0]).toMatchObject({ freelancerCents: 0, outcome: 'cancelled' });
+    expect(run.released()).toBe(1);
+    expect(run.told).toEqual([['cancelled', fixture.milestoneId]]);
   });
 
   it('leaves a check to the client when its two runs disagree', async () => {

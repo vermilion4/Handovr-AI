@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { holds, milestones, paymentEvents, submissions, verdicts, type Db } from '../db/schema';
+import { holds, milestones, paymentEvents, settlements, submissions, verdicts, type Db } from '../db/schema';
 import { createTestDb } from '../db/test-db';
 import { expireReviews, submitReview } from './review';
 import { setupVerification, type VerificationFixture } from './testing';
@@ -30,14 +30,14 @@ beforeEach(async () => {
 });
 
 const review = (decisions: Record<string, 'approved' | 'rejected'>, reason = '', userId = fixture.clientId) =>
-  submitReview(db, { milestoneId: fixture.milestoneId, userId, decisions, reason, now });
+  submitReview(db, { milestoneId: fixture.milestoneId, userId, decisions, reason, now, windowSeconds: 3600 });
 const milestoneNow = async () => (await db.select().from(milestones).where(eq(milestones.id, fixture.milestoneId)))[0];
 const clientVerdicts = async () =>
   (await db.select().from(verdicts).where(eq(verdicts.source, 'client'))).map((row) => [row.criterionId, row.verdict, row.summary]);
 
 describe('submitReview', () => {
   it('releases the money when the client approves every open check', async () => {
-    expect(await review({ [form]: 'approved', [look]: 'approved' })).toEqual({ ok: true, released: true });
+    expect(await review({ [form]: 'approved', [look]: 'approved' })).toEqual({ ok: true, released: true, settlement: 'skipped' });
     expect(await milestoneNow()).toMatchObject({ state: 'releasing', reviewDueAt: null });
     expect(await clientVerdicts()).toEqual(
       expect.arrayContaining([[form, 'approved', 'Approved by the client.'], [look, 'approved', 'Approved by the client.']]),
@@ -46,9 +46,17 @@ describe('submitReview', () => {
   });
 
   it('sends the work back with the reason when any check is rejected', async () => {
-    expect(await review({ [form]: 'approved', [look]: 'rejected' }, 'The header does not match the homepage colours.')).toEqual({ ok: true, released: false });
+    expect(await review({ [form]: 'approved', [look]: 'rejected' }, 'The header does not match the homepage colours.')).toEqual({ ok: true, released: false, settlement: 'skipped' });
     expect(await milestoneNow()).toMatchObject({ state: 'revision', attemptsUsed: 1 });
     expect(await clientVerdicts()).toEqual(expect.arrayContaining([[look, 'rejected', 'The header does not match the homepage colours.']]));
+  });
+
+  it('writes the split when the client sends back the fourth attempt', async () => {
+    await db.update(milestones).set({ attemptsUsed: 4 }).where(eq(milestones.id, fixture.milestoneId));
+    const result = await review({ [form]: 'approved', [look]: 'rejected' }, 'The header still does not match.');
+    expect(result).toEqual({ ok: true, released: false, settlement: 'proposed' });
+    expect((await milestoneNow()).state).toBe('settlement_proposed');
+    expect((await db.select().from(settlements))[0]).toMatchObject({ freelancerCents: 50000, clientCents: 10000 });
   });
 
   it('needs a reason to send the work back', async () => {

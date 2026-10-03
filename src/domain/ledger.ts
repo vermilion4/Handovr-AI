@@ -120,3 +120,37 @@ export function ledgerCsv(rows: LedgerRow[]): string {
   );
   return ['Date,Project,Milestone,Event,Amount (CAD),PayPal reference', ...lines, ''].join('\r\n');
 }
+
+export interface LedgerWeek {
+  weekStart: string;
+  heldCents: number;
+  releasedCents: number;
+  returnedCents: number;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function mondayOf(date: Date): number {
+  const day = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  return day - ((new Date(day).getUTCDay() + 6) % 7) * DAY_MS;
+}
+
+/** Completed money movements totalled by week, every week from the first to the last included. */
+export function ledgerByWeek(events: LedgerEvent[], role: Role): LedgerWeek[] {
+  const done = events.filter((event) => event.status === 'completed');
+  if (done.length === 0) return [];
+  const client = role === 'client';
+  const weeks = new Map<number, LedgerWeek>();
+  const first = Math.min(...done.map((event) => mondayOf(event.at)));
+  const last = Math.max(...done.map((event) => mondayOf(event.at)));
+  for (let week = first; week <= last; week += 7 * DAY_MS) {
+    weeks.set(week, { weekStart: new Date(week).toISOString().slice(0, 10), heldCents: 0, releasedCents: 0, returnedCents: 0 });
+  }
+  for (const event of done) {
+    const week = weeks.get(mondayOf(event.at))!;
+    if (event.type === 'hold') week.heldCents += client ? event.amountCents : event.holdAmountCents;
+    if (event.type === 'payout') week.releasedCents += event.amountCents;
+    if (event.type === 'void' && client) week.returnedCents += event.amountCents;
+  }
+  return [...weeks.values()];
+}

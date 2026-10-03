@@ -119,7 +119,15 @@ describe('checkUrl', () => {
 });
 
 describe('checkDisplay', () => {
-  const base = { kind: 'machine' as const, aiVerdict: null, clientDecision: null, isCurrent: false, running: false };
+  const base = { kind: 'machine' as const, aiVerdict: null, clientDecision: null, isCurrent: false, running: false, settled: false };
+
+  it('shows an undecided check as not reviewed once a split is proposed', () => {
+    const settled = { ...base, settled: true };
+    expect(checkDisplay({ ...settled, kind: 'human' })).toBe('not_reviewed');
+    expect(checkDisplay({ ...settled, aiVerdict: 'unclear' })).toBe('not_reviewed');
+    expect(checkDisplay({ ...settled, aiVerdict: 'fail' })).toBe('failed');
+    expect(checkDisplay({ ...settled, kind: 'human', clientDecision: 'approved' })).toBe('approved');
+  });
 
   it("shows the client's decision over the tester's verdict", () => {
     expect(checkDisplay({ ...base, aiVerdict: 'unclear', clientDecision: 'approved' })).toBe('approved');

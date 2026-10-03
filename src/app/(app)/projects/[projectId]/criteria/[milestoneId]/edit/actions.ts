@@ -7,8 +7,11 @@ import { getCurrentUser } from '@/auth/current-user';
 import { rewriteCriteria } from '@/criteria/drafter';
 import { db } from '@/db/client';
 import { getContract, saveEdit } from '@/db/queries/contract';
+import { takeAllowance } from '@/db/queries/usage';
 import { readCriteriaList, type CriterionFields } from '@/domain/criteria';
 import { isUuid } from '@/domain/ids';
+import { limitsFrom } from '@/domain/usage';
+import { notifyLater } from '@/notifications/live';
 
 const UNREADABLE = 'The list could not be read. Reload the page and try again.';
 
@@ -34,6 +37,9 @@ export async function rewriteAction(
   const wanted = typeof request === 'string' ? request.trim() : '';
   if (wanted.length < 5) return { error: 'Describe the change you want.' };
   if (wanted.length > 1000) return { error: 'Keep the request under 1,000 characters.' };
+
+  const allowed = await takeAllowance(db, { userId: user.id, kind: 'rewrite', now: new Date(), limits: limitsFrom(process.env) });
+  if (!allowed.ok) return { error: allowed.message };
 
   try {
     const rewritten = await rewriteCriteria(claudeModel(), {
@@ -74,6 +80,7 @@ export async function saveEditAction(
   });
   if (!result.ok) return { error: result.reason };
 
+  notifyLater(db, { kind: 'changes_suggested', milestoneId, to: user.role === 'client' ? 'freelancer' : 'client' });
   revalidatePath(`/projects/${projectId}/criteria`);
   redirect(`/projects/${projectId}/criteria?saved=${milestoneId}`);
 }

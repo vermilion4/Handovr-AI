@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { holds, milestones, webhookEvents, type Db } from '../db/schema';
 import { createTestDb } from '../db/test-db';
+import { recordingNotice } from '../notifications/notice';
 import { applyEvent } from './milestone-events';
 import { processPayments } from './processor';
 import { fakeGateway, setupMilestone, type FakeGateway } from './testing';
@@ -40,6 +41,16 @@ describe('handleWebhook', () => {
 
     expect(await send({ id: 'WH-2', event_type: 'PAYMENT.PAYOUTS-ITEM.SUCCEEDED', resource: {} })).toBe('handled');
     expect(await stateOf(milestoneId)).toBe('released');
+  });
+
+  it('tells both people when a payout event confirms the payment', async () => {
+    const { milestoneId } = await setupMilestone(db, { state: 'client_review' });
+    await applyEvent(db, milestoneId, { type: 'client_approved' }, { now });
+    await processPayments(db, gateway, now);
+    gateway.payoutState = { status: 'success', detail: '' };
+    const notice = recordingNotice();
+    await handleWebhook(db, gateway, { headers, body: JSON.stringify({ id: 'WH-9', event_type: 'PAYMENT.PAYOUTS-ITEM.SUCCEEDED' }), now }, notice);
+    expect(notice.told).toEqual([['paid', milestoneId]]);
   });
 
   it('handles each event once', async () => {

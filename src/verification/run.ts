@@ -1,7 +1,10 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { evidence, milestones, submissions, verdicts, type Db } from '../db/schema';
 import { allMachineUnclear, combineRuns, itemsForClient, verificationOutcome, type AiVerdict } from '../domain/verification';
+import type { NotificationKind } from '../notifications/messages';
+import type { Notice } from '../notifications/notice';
 import { applyEvent } from '../payments/milestone-events';
+import { proposeSettlement } from '../settlement/propose';
 import { runCheck, type CheckRun, type CreateMessage, type EvidenceItem } from './agent';
 import type { BrowserTools } from './browser';
 import { checkOutcomes, signedChecks } from './outcomes';
@@ -18,6 +21,8 @@ export interface VerificationDeps {
   now(): Date;
   reviewWindowSeconds: number;
   onRelease(): Promise<void>;
+  onSettlement(milestoneId: string): Promise<void>;
+  onNotify: Notice;
 }
 
 export type RunResult = 'skipped' | 'paused' | 'unreachable' | 'passed' | 'failed' | 'retry';
@@ -107,7 +112,7 @@ async function markUnreachable(db: Db, deps: VerificationDeps, submission: Submi
 /** Records the result and moves the milestone on, all or nothing. */
 async function finish(db: Db, deps: VerificationDeps, submission: Submission): Promise<'passed' | 'failed' | 'unreachable'> {
   const now = deps.now();
-  const { result, released } = await db.transaction(async (tx) => {
+  const { result, released, settlement, notice } = await db.transaction(async (tx) => {
     const [milestone] = await tx.select().from(milestones).where(eq(milestones.id, submission.milestoneId)).for('update');
     if (milestone.state !== 'verifying') throw new Paused();
 
@@ -130,7 +135,7 @@ async function finish(db: Db, deps: VerificationDeps, submission: Submission): P
       if (!row) throw new LostClaim();
       const applied = await applyEvent(tx, submission.milestoneId, { type: 'site_unreachable' }, { now });
       if (!applied.ok) throw new Paused();
-      return { result: 'unreachable' as const, released: false };
+      return { result: 'unreachable' as const, released: false, settlement: 'skipped' as const, notice: null };
     }
     const result = verificationOutcome(outcomes);
     const [row] = await tx
@@ -142,20 +147,30 @@ async function finish(db: Db, deps: VerificationDeps, submission: Submission): P
 
     const applied = await applyEvent(tx, submission.milestoneId, { type: result === 'passed' ? 'verification_passed' : 'verification_failed' }, { now });
     if (!applied.ok) throw new Paused();
-    if (result === 'failed') return { result, released: false };
+    if (result === 'failed') {
+      const settlement =
+        applied.state === 'settlement_proposed'
+          ? await proposeSettlement(tx, submission.milestoneId, { now, windowSeconds: deps.reviewWindowSeconds })
+          : ('skipped' as const);
+      const notice: NotificationKind = settlement === 'proposed' ? 'split_proposed' : settlement === 'cancelled' ? 'cancelled' : 'sent_back';
+      return { result, released: false, settlement, notice };
+    }
 
     if (itemsForClient(outcomes).length === 0) {
       const approved = await applyEvent(tx, submission.milestoneId, { type: 'client_approved' }, { now });
-      return { result, released: approved.ok };
+      return { result, released: approved.ok, settlement: 'skipped' as const, notice: null };
     }
     await tx
       .update(milestones)
       .set({ reviewDueAt: new Date(now.getTime() + deps.reviewWindowSeconds * 1000) })
       .where(eq(milestones.id, submission.milestoneId));
-    return { result, released: false };
+    return { result, released: false, settlement: 'skipped' as const, notice: 'review_needed' as const };
   });
 
-  if (released) await deps.onRelease();
+  // A release and a split worth nothing both leave money work queued.
+  if (released || settlement === 'cancelled') await deps.onRelease();
+  if (settlement === 'proposed') await deps.onSettlement(submission.milestoneId).catch((error) => console.error('Explaining the split failed', error));
+  if (notice) await deps.onNotify(notice, submission.milestoneId);
   return result;
 }
 
