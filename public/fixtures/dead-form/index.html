@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contact - Chen's Bakery</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header><strong>Chen's Bakery</strong><nav><a href="../menu.html">Menu</a><a href="https://example.com/">Our supplier</a></nav></header>
+<main>
+  <section>
+    <h1>Get in touch</h1>
+    <form id="contact">
+      <label for="name">Name</label><input id="name" name="name" required>
+      <label for="email">Email</label><input id="email" name="email" type="email" required>
+      <label for="message">Message</label><textarea id="message" name="message" rows="4" required></textarea>
+      <button type="submit">Send</button>
+    </form>
+    <p id="sent" class="confirmation hidden" role="status">Thanks, your message was sent. We reply within a day.</p>
+  </section>
+  <section>
+    <h2>Opening hours</h2>
+    <table>
+      <tr><td>Monday</td><td>7am to 6pm</td></tr><tr><td>Tuesday</td><td>7am to 6pm</td></tr>
+      <tr><td>Wednesday</td><td>7am to 6pm</td></tr><tr><td>Thursday</td><td>7am to 6pm</td></tr>
+      <tr><td>Friday</td><td>7am to 8pm</td></tr><tr><td>Saturday</td><td>8am to 8pm</td></tr>
+      <tr><td>Sunday</td><td>Closed</td></tr>
+    </table>
+    <p>123 Queen Street West, Toronto</p>
+  </section>
+</main>
+<script>document.getElementById('contact').addEventListener('submit', function (event) { event.preventDefault(); });</script>
+</body>
+</html>

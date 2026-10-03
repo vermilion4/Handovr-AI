@@ -1,5 +1,8 @@
+import type { ContractStatus, DraftStatus } from './contract';
 import type { MilestoneState } from './milestone-state';
-import { formatUsd } from './money';
+import { formatMoney } from './money';
+import { paidCents } from './settlement';
+import { milestoneProgress, type Progress } from './progress';
 
 export type Role = 'client' | 'freelancer';
 
@@ -8,7 +11,11 @@ export interface SummaryMilestone {
   title: string;
   amountCents: number;
   state: MilestoneState;
-  criteriaDraft: 'pending' | 'ready';
+  criteriaDraft: DraftStatus;
+  /** What the list of checks needs from the viewer. Treated as ready to sign when absent. */
+  contract?: ContractStatus;
+  /** The freelancer's share when a split was agreed. */
+  splitFreelancerCents?: number | null;
 }
 
 export interface SummaryInput {
@@ -26,6 +33,8 @@ export interface ProjectSummary {
   milestoneLabel: string;
   status: { icon: string; text: string; tone: Tone };
   segments: Array<{ amountCents: number; kind: 'released' | 'held' | 'none' }>;
+  /** The steps reached by the milestone named in `milestoneLabel`, or by the last one once finished. */
+  progress: Progress | null;
   caption: string;
   actionLabel: string;
   needsViewer: boolean;
@@ -54,20 +63,30 @@ function countLabel(count: number): string {
   return count === 1 ? '1 milestone' : `${count} milestones`;
 }
 
-interface Status {
+export interface MilestoneStatus {
   icon: string;
   text: string;
   tone: Tone;
   action: string;
 }
 
-function currentStatus(milestone: SummaryMilestone, role: Role, other: string): Status {
+export function milestoneStatus(milestone: SummaryMilestone, role: Role, other: string): MilestoneStatus {
   const client = role === 'client';
   switch (milestone.state) {
     case 'drafting':
-      return milestone.criteriaDraft === 'pending'
-        ? { icon: 'smart_toy', text: 'Handovr is drafting the criteria', tone: 'progress', action: 'View progress' }
-        : { icon: 'edit', text: 'Criteria ready for you to sign', tone: 'attention', action: 'Sign criteria' };
+      if (milestone.criteriaDraft === 'failed') {
+        return { icon: 'error', text: 'Drafting stopped, open to try again', tone: 'attention', action: 'Open' };
+      }
+      if (milestone.criteriaDraft !== 'ready') {
+        return { icon: 'smart_toy', text: 'Handovr is drafting the criteria', tone: 'progress', action: 'View progress' };
+      }
+      if (milestone.contract === 'changes_suggested') {
+        return { icon: 'rate_review', text: `${other} suggested changes`, tone: 'attention', action: 'Review changes' };
+      }
+      if (milestone.contract === 'signed_by_viewer') {
+        return { icon: 'schedule', text: `You signed. Waiting for ${other} to sign`, tone: 'neutral', action: 'Open' };
+      }
+      return { icon: 'edit', text: 'Criteria ready for you to sign', tone: 'attention', action: 'Sign criteria' };
     case 'signed':
       return client
         ? { icon: 'lock', text: 'Ready for you to fund', tone: 'attention', action: 'Fund milestone' }
@@ -94,6 +113,12 @@ function currentStatus(milestone: SummaryMilestone, role: Role, other: string): 
       return client
         ? { icon: 'error', text: 'Funding problem, please fund again', tone: 'attention', action: 'Fix funding' }
         : { icon: 'schedule', text: `Waiting for ${other} to fix funding`, tone: 'neutral', action: 'Open' };
+    case 'cancelled':
+      return client
+        ? { icon: 'block', text: 'Cancelled. Your hold was returned and nothing was paid', tone: 'neutral', action: 'Open' }
+        : { icon: 'block', text: `Cancelled. The hold was returned to ${other}`, tone: 'neutral', action: 'Open' };
+    case 'lapsed':
+      return { icon: 'timer_off', text: 'Hold expired before the work was released. Nothing was paid', tone: 'neutral', action: 'Open' };
     default:
       return { icon: 'check_circle', text: 'Finished', tone: 'done', action: 'Open' };
   }
@@ -101,14 +126,14 @@ function currentStatus(milestone: SummaryMilestone, role: Role, other: string): 
 
 function caption(role: Role, heldCents: number, releasedCents: number, totalCents: number, finished: boolean): string {
   const client = role === 'client';
-  const held = `${formatUsd(heldCents)} held${client ? '' : ' for you'}`;
-  const released = `${formatUsd(releasedCents)} ${client ? 'released' : 'paid'}`;
+  const held = `${formatMoney(heldCents)} held${client ? '' : ' for you'}`;
+  const released = `${formatMoney(releasedCents)} ${client ? 'released' : 'paid'}`;
   if (finished) return released;
   if (totalCents === 0) return 'Nothing held yet';
-  if (heldCents > 0 && releasedCents > 0) return `${held}, ${released} of ${formatUsd(totalCents)}`;
-  if (heldCents > 0) return `${held} of ${formatUsd(totalCents)}`;
-  if (releasedCents > 0) return `${released} of ${formatUsd(totalCents)}`;
-  return `Nothing held yet of ${formatUsd(totalCents)}`;
+  if (heldCents > 0 && releasedCents > 0) return `${held}, ${released} of ${formatMoney(totalCents)}`;
+  if (heldCents > 0) return `${held} of ${formatMoney(totalCents)}`;
+  if (releasedCents > 0) return `${released} of ${formatMoney(totalCents)}`;
+  return `Nothing held yet of ${formatMoney(totalCents)}`;
 }
 
 export function summariseProject(input: SummaryInput): ProjectSummary {
@@ -116,8 +141,11 @@ export function summariseProject(input: SummaryInput): ProjectSummary {
   const other = input.counterpartName.split(' ')[0];
 
   const segments = milestones.map((m) => ({ amountCents: m.amountCents, kind: segmentKind(m.state) }));
-  const sum = (kind: 'released' | 'held') =>
-    segments.filter((s) => s.kind === kind).reduce((total, s) => total + s.amountCents, 0);
+  const held = milestones.filter((m) => segmentKind(m.state) === 'held').reduce((total, m) => total + m.amountCents, 0);
+  // A split pays only the freelancer's share, so that is what counts as released.
+  const released = milestones
+    .filter((m) => m.state === 'released')
+    .reduce((total, m) => total + paidCents({ amountCents: m.amountCents, splitFreelancerCents: m.splitFreelancerCents ?? null }), 0);
   const totalCents = milestones.reduce((total, m) => total + m.amountCents, 0);
 
   if (milestones.length === 0) {
@@ -126,6 +154,7 @@ export function summariseProject(input: SummaryInput): ProjectSummary {
       milestoneLabel: 'No milestones yet',
       status: { icon: 'edit', text: 'Add a milestone to get started', tone: 'attention' },
       segments,
+      progress: null,
       caption: caption(role, 0, 0, 0, false),
       actionLabel: 'Open',
       needsViewer: true,
@@ -144,14 +173,15 @@ export function summariseProject(input: SummaryInput): ProjectSummary {
         tone: 'done',
       },
       segments,
-      caption: caption(role, 0, sum('released'), totalCents, true),
+      progress: milestoneProgress(milestones[milestones.length - 1].state),
+      caption: caption(role, 0, released, totalCents, true),
       actionLabel: 'Open',
       needsViewer: false,
     };
   }
 
-  const status = currentStatus(current, role, other);
-  const draftingAll = current.state === 'drafting' && current.criteriaDraft === 'pending';
+  const status = milestoneStatus(current, role, other);
+  const draftingAll = current.state === 'drafting' && current.criteriaDraft !== 'ready';
 
   return {
     finished: false,
@@ -160,7 +190,8 @@ export function summariseProject(input: SummaryInput): ProjectSummary {
       : `Milestone ${current.position} of ${milestones.length}: ${current.title}`,
     status: { icon: status.icon, text: status.text, tone: status.tone },
     segments,
-    caption: caption(role, sum('held'), sum('released'), totalCents, false),
+    progress: milestoneProgress(current.state),
+    caption: caption(role, held, released, totalCents, false),
     actionLabel: status.action,
     needsViewer: status.tone === 'attention',
   };

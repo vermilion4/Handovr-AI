@@ -1,5 +1,23 @@
+import { asc, eq } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import type { CriterionCategory, CriterionKind } from '../domain/criteria';
 import type { MilestoneState } from '../domain/milestone-state';
-import { milestones, projects, users, type Db } from './schema';
+import { holdTotalCents } from '../domain/hold';
+import { allocateShares } from '../domain/shares';
+import {
+  criteria,
+  criteriaVersions,
+  evidence,
+  holds,
+  milestones,
+  paymentEvents,
+  projects,
+  signatures,
+  submissions,
+  users,
+  verdicts,
+  type Db,
+} from './schema';
 
 export const DEMO_CLIENT_EMAIL = 'maya@chensbakery.example';
 export const DEMO_FREELANCER_EMAIL = 'tomas@riverastudio.example';
@@ -87,6 +105,190 @@ const PROJECTS: ProjectSeed[] = [
   },
 ];
 
+type Check = [description: string, testPlan: string, kind: CriterionKind, category: CriterionCategory | null, weight: number];
+
+const CHECKS: Check[] = [
+  ['Everything the brief asks for works', 'Each feature in the brief is used once and behaves as described.', 'machine', 'function', 3],
+  ['The page works at phone width', 'At 390 pixels wide, nothing overflows and every control can be used.', 'machine', 'responsive', 3],
+  ['The page loads in under 3 seconds', 'Measured on a fresh visit, three times, taking the middle result.', 'machine', 'performance', 2],
+  ['No links on the page are broken', 'Every link is opened and must load a real page.', 'machine', 'function', 2],
+  ['The page matches the look of the rest of the site', 'A test cannot judge this, so the client will.', 'human', null, 2],
+];
+
+const CHANGED_SPEED: Check = [
+  'The page loads in under 4 seconds on a phone connection',
+  'Measured on a simulated 4G phone connection, three times, taking the middle result.',
+  'machine',
+  'performance',
+  9,
+];
+const ADDED_CHECK: Check = [
+  'The account page shows the customer name',
+  'After logging in with the test account, the account page shows that account’s name.',
+  'machine',
+  'content',
+  5,
+];
+
+async function insertList(
+  db: Db,
+  milestoneId: string,
+  amountCents: number,
+  version: number,
+  authorId: string | null,
+  reason: string,
+  checks: Check[],
+  keys: string[],
+): Promise<string> {
+  const [row] = await db
+    .insert(criteriaVersions)
+    .values({ milestoneId, version, authorId, reason })
+    .returning({ id: criteriaVersions.id });
+  const shares = allocateShares(amountCents, checks.map((check) => check[4]));
+  await db.insert(criteria).values(
+    checks.map(([description, testPlan, kind, category], index) => ({
+      versionId: row.id,
+      key: keys[index],
+      position: index + 1,
+      description,
+      testPlan,
+      kind,
+      category,
+      shareCents: shares[index],
+    })),
+  );
+  return row.id;
+}
+
+const HELD_STATES: ReadonlySet<MilestoneState> = new Set([
+  'funded',
+  'verifying',
+  'client_review',
+  'revision',
+  'settlement_proposed',
+]);
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+let demoReference = 0;
+
+/** A simulated hold and the money events that brought a seeded milestone to its state. */
+async function insertMoneyHistory(
+  db: Db,
+  milestone: { id: string; amountCents: number; state: MilestoneState; position: number },
+  projectCreatedAt: Date,
+): Promise<void> {
+  const released = milestone.state === 'released';
+  if (!released && !HELD_STATES.has(milestone.state)) return;
+
+  const reference = (kind: string) => `DEMO-${kind}-${String(++demoReference).padStart(4, '0')}`;
+  const fundedAt = new Date(projectCreatedAt.getTime() + (milestone.position * 3 - 1) * DAY_MS);
+  const releasedAt = new Date(fundedAt.getTime() + 6 * DAY_MS);
+  const totalCents = holdTotalCents(milestone.amountCents);
+  const authorizationId = reference('AUTH');
+
+  const [hold] = await db
+    .insert(holds)
+    .values({
+      milestoneId: milestone.id,
+      requestId: randomUUID(),
+      paypalOrderId: reference('ORDER'),
+      authorizationId,
+      amountCents: milestone.amountCents,
+      totalCents,
+      status: released ? 'captured' : 'active',
+      simulated: true,
+      createdAt: fundedAt,
+      authorizedAt: fundedAt,
+      expiresAt: new Date(fundedAt.getTime() + 29 * DAY_MS),
+    })
+    .returning({ id: holds.id });
+
+  const row = { milestoneId: milestone.id, holdId: hold.id, status: 'completed' as const };
+  await db.insert(paymentEvents).values([
+    { ...row, type: 'hold', amountCents: totalCents, paypalId: authorizationId, createdAt: fundedAt, updatedAt: fundedAt },
+    ...(released
+      ? [
+          { ...row, type: 'capture' as const, amountCents: totalCents, paypalId: reference('CAP'), createdAt: releasedAt, updatedAt: releasedAt },
+          {
+            ...row,
+            type: 'payout' as const,
+            amountCents: milestone.amountCents,
+            paypalId: reference('PAYOUT'),
+            createdAt: new Date(releasedAt.getTime() + 60_000),
+            updatedAt: new Date(releasedAt.getTime() + 60_000),
+          },
+        ]
+      : []),
+  ]);
+}
+
+const TESTED_STATES: ReadonlySet<MilestoneState> = new Set(['verifying', 'client_review', 'revision', 'releasing', 'released']);
+
+/** A simulated submission with the verdicts that brought a seeded milestone to its state. */
+async function insertTestHistory(
+  db: Db,
+  milestone: { id: string; state: MilestoneState },
+  versionId: string,
+  projectCreatedAt: Date,
+  position: number,
+): Promise<void> {
+  if (!TESTED_STATES.has(milestone.state)) return;
+
+  const checks = await db.select().from(criteria).where(eq(criteria.versionId, versionId)).orderBy(asc(criteria.position));
+  const machine = checks.filter((check) => check.kind === 'machine');
+  const submittedAt = new Date(projectCreatedAt.getTime() + (position * 3 + 1) * DAY_MS);
+  const testing = milestone.state === 'verifying';
+  const done = testing ? machine.slice(0, 2) : machine;
+
+  const [submission] = await db
+    .insert(submissions)
+    .values({
+      milestoneId: milestone.id,
+      attempt: 1,
+      url: 'https://preview.chensbakery.example/contact',
+      status: testing ? 'running' : 'passed',
+      simulated: true,
+      tries: 1,
+      currentCriterionId: testing ? (machine[2]?.id ?? null) : null,
+      progressNote: testing && machine[2] ? `Testing: ${machine[2].description}` : '',
+      createdAt: submittedAt,
+      startedAt: submittedAt,
+      finishedAt: testing ? null : new Date(submittedAt.getTime() + 4 * 60_000),
+    })
+    .returning({ id: submissions.id });
+
+  for (const check of done) {
+    const [verdict] = await db
+      .insert(verdicts)
+      .values({
+        submissionId: submission.id,
+        criterionId: check.id,
+        source: 'ai',
+        verdict: 'pass',
+        summary: `Ran the agreed test: ${check.testPlan} The result met it.`,
+        createdAt: submittedAt,
+      })
+      .returning({ id: verdicts.id });
+    if (check.category === 'performance') {
+      await db.insert(evidence).values({ submissionId: submission.id, verdictId: verdict.id, kind: 'timing', caption: 'Load times', text: '2.1, 2.4, 2.2 seconds' });
+    }
+  }
+
+  if (milestone.state === 'released' || milestone.state === 'releasing') {
+    await db.insert(verdicts).values(
+      checks
+        .filter((check) => check.kind === 'human')
+        .map((check) => ({ submissionId: submission.id, criterionId: check.id, source: 'client' as const, verdict: 'approved' as const, summary: 'Approved by the client.', createdAt: submittedAt })),
+    );
+  }
+  if (milestone.state === 'client_review') {
+    await db
+      .update(milestones)
+      .set({ reviewDueAt: new Date(Date.now() + 5 * DAY_MS) })
+      .where(eq(milestones.id, milestone.id));
+  }
+}
+
 export async function seedDemo(db: Db): Promise<{ mayaId: string; tomasId: string; lonelyId: string }> {
   const ids = new Map<string, string>();
   for (const [key, name, email, role] of PEOPLE) {
@@ -106,16 +308,53 @@ export async function seedDemo(db: Db): Promise<{ mayaId: string; tomasId: strin
       })
       .returning({ id: projects.id });
 
-    await db.insert(milestones).values(
-      project.milestones.map(([title, amountCents, state, criteriaDraft], index) => ({
-        projectId: row.id,
-        position: index + 1,
-        title,
-        amountCents,
-        state,
-        criteriaDraft,
-      })),
-    );
+    const milestoneRows = await db
+      .insert(milestones)
+      .values(
+        project.milestones.map(([title, amountCents, state, criteriaDraft], index) => ({
+          projectId: row.id,
+          position: index + 1,
+          title,
+          amountCents,
+          state,
+          criteriaDraft,
+          attemptsUsed: TESTED_STATES.has(state) && state !== 'verifying' ? 1 : 0,
+          submittedFrom: state === 'verifying' ? ('funded' as const) : null,
+        })),
+      )
+      .returning();
+
+    for (const milestone of milestoneRows) {
+      await insertMoneyHistory(db, milestone, new Date(project.createdAt));
+      if (milestone.criteriaDraft !== 'ready') continue;
+      const keys = CHECKS.map(() => randomUUID());
+      const versionId = await insertList(db, milestone.id, milestone.amountCents, 1, null, '', CHECKS, keys);
+      await insertTestHistory(db, milestone, versionId, new Date(project.createdAt), milestone.position);
+
+      if (milestone.state !== 'drafting') {
+        await db.insert(signatures).values(
+          [project.client, project.freelancer].map((key) => {
+            const [, name, email] = PEOPLE.find((person) => person[0] === key)!;
+            return { versionId, userId: ids.get(key)!, signedName: name, signedEmail: email };
+          }),
+        );
+      }
+
+      if (project.title === 'Wholesale order portal' && milestone.position === 1) {
+        const [works, phone, , links, look] = CHECKS;
+        const reweigh = (check: Check, weight: number): Check => [check[0], check[1], check[2], check[3], weight];
+        await insertList(
+          db,
+          milestone.id,
+          milestone.amountCents,
+          2,
+          ids.get('tomas')!,
+          'Order history pulls a lot of data, so 3 seconds is tight on mobile. I also added a check that the account page shows the right customer.',
+          [reweigh(works, 14), reweigh(phone, 14), CHANGED_SPEED, reweigh(links, 9), ADDED_CHECK, reweigh(look, 9)],
+          [keys[0], keys[1], keys[2], keys[3], randomUUID(), keys[4]],
+        );
+      }
+    }
   }
 
   return { mayaId: ids.get('maya')!, tomasId: ids.get('tomas')!, lonelyId: ids.get('lonely')! };

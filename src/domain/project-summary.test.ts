@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { summariseProject, type SummaryInput, type SummaryMilestone } from './project-summary';
+import { milestoneStatus, summariseProject, type SummaryInput, type SummaryMilestone } from './project-summary';
 
 const m = (
   position: number,
@@ -34,6 +34,7 @@ describe('summariseProject', () => {
         { amountCents: 60000, kind: 'held' },
         { amountCents: 120000, kind: 'none' },
       ],
+      progress: { done: 3, tone: 'held', short: 'Checked', label: 'held and tested, waiting for review' },
       caption: '$600.00 held, $900.00 released of $2,700.00',
       actionLabel: 'Review now',
       needsViewer: true,
@@ -118,5 +119,75 @@ describe('summariseProject', () => {
       caption: 'Nothing held yet',
       actionLabel: 'Open',
     });
+  });
+
+  it('tells both sides when drafting stopped', () => {
+    const summary = summariseProject(input({ milestones: [m(1, 'Landing page', 70000, 'drafting', 'failed')] }));
+    expect(summary.status).toEqual({ icon: 'error', text: 'Drafting stopped, open to try again', tone: 'attention' });
+    expect(summary.actionLabel).toBe('Open');
+  });
+
+  it('treats a milestone being written as still drafting', () => {
+    const summary = summariseProject(input({ milestones: [m(1, 'Landing page', 70000, 'drafting', 'drafting')] }));
+    expect(summary.status.text).toBe('Handovr is drafting the criteria');
+    expect(summary.milestoneLabel).toBe('1 milestone');
+  });
+
+  it('tells the person who has signed that it is waiting for the other side', () => {
+    const signed = [{ ...m(1, 'Login page', 10000, 'drafting'), contract: 'signed_by_viewer' as const }];
+    const summary = summariseProject(input({ role: 'freelancer', counterpartName: 'Tony Client', milestones: signed }));
+    expect(summary.status).toEqual({ icon: 'schedule', text: 'You signed. Waiting for Tony to sign', tone: 'neutral' });
+    expect(summary.actionLabel).toBe('Open');
+    expect(summary.needsViewer).toBe(false);
+  });
+
+  it('tells a person when the other side changed the list', () => {
+    const changed = [{ ...m(1, 'Login page', 10000, 'drafting'), contract: 'changes_suggested' as const }];
+    const summary = summariseProject(input({ milestones: changed }));
+    expect(summary.status).toEqual({ icon: 'rate_review', text: 'Tomás suggested changes', tone: 'attention' });
+    expect(summary.actionLabel).toBe('Review changes');
+  });
+
+  it('shows the progress of the milestone it names, or the last one once the project is finished', () => {
+    const finished = summariseProject(input({ milestones: [m(1, 'Homepage', 90000, 'released'), m(2, 'Contact page', 60000, 'released')] }));
+    expect(finished.progress?.done).toBe(4);
+    const signed = summariseProject(input({ milestones: [m(1, 'Landing page', 15000, 'signed'), m(2, 'Menu', 20000, 'drafting')] }));
+    expect(signed.progress).toMatchObject({ done: 1, short: 'Agreed' });
+    expect(summariseProject(input({ milestones: [] })).progress).toBeNull();
+  });
+});
+
+describe('summariseProject after a split', () => {
+  it("counts only the freelancer's share as paid", () => {
+    const split = { ...m(1, 'Contact', 10000, 'released'), splitFreelancerCents: 7500 };
+    expect(summariseProject(input({ role: 'freelancer', milestones: [split], finishedAt: new Date('2026-10-03T12:00:00Z') })).caption).toBe('$75.00 paid');
+    expect(summariseProject(input({ milestones: [split, m(2, 'Menu', 5000, 'funded')] })).caption).toBe('$50.00 held, $75.00 released of $150.00');
+  });
+});
+
+describe('milestoneStatus', () => {
+  it('tells the client a signed milestone is theirs to fund, and the freelancer to wait', () => {
+    const signed = m(2, 'Contact page', 60000, 'signed');
+    expect(milestoneStatus(signed, 'client', 'Tomás')).toEqual({
+      icon: 'lock',
+      text: 'Ready for you to fund',
+      tone: 'attention',
+      action: 'Fund milestone',
+    });
+    expect(milestoneStatus(signed, 'freelancer', 'Maya').text).toBe('Waiting for Maya to fund');
+  });
+
+  it('does not call a cancelled or expired milestone finished', () => {
+    expect(milestoneStatus(m(1, 'Landing page', 15000, 'cancelled'), 'client', 'John')).toMatchObject({
+      icon: 'block',
+      text: 'Cancelled. Your hold was returned and nothing was paid',
+    });
+    expect(milestoneStatus(m(1, 'Landing page', 15000, 'cancelled'), 'freelancer', 'Tony').text).toBe(
+      'Cancelled. The hold was returned to Tony',
+    );
+    expect(milestoneStatus(m(1, 'Landing page', 15000, 'lapsed'), 'client', 'John').text).toBe(
+      'Hold expired before the work was released. Nothing was paid',
+    );
+    expect(milestoneStatus(m(1, 'Landing page', 15000, 'released'), 'client', 'John').text).toBe('Finished');
   });
 });

@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { cookies } from 'next/headers';
 import { db } from '@/db/client';
 import { users } from '@/db/schema';
-import { SESSION_COOKIE, verifySession } from './session';
+import { SESSION_COOKIE, signSession, verifySession } from './session';
 
 export function sessionSecret(): string {
   const secret = process.env.SESSION_SECRET;
@@ -23,4 +23,14 @@ export async function getCurrentUser() {
     .where(eq(users.id, userId))
     .limit(1);
   return user ?? null;
+}
+
+export async function startSession(userId: string): Promise<void> {
+  (await cookies()).set(SESSION_COOKIE, signSession(userId, sessionSecret()), {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: 60 * 60 * 24 * 7,
+  });
 }
