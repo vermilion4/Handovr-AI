@@ -28,7 +28,7 @@ function argument(name: string): string | undefined {
 async function main() {
   const base = argument('base');
   const models = (argument('models') ?? 'claude-sonnet-5-5').split(',');
-  if (!base) throw new Error('Usage: pnpm eval:verification -- --base <address of public/fixtures/> --models a,b');
+  if (!base) throw new Error('Usage: pnpm eval:verification -- --base <address of public/fixtures/> --models a,b [--fixtures slow,good]');
 
   const client = new Anthropic({ timeout: 60_000, maxRetries: 1 });
   for (const model of models) {
@@ -38,7 +38,8 @@ async function main() {
     const tokens = { input: 0, output: 0 };
     console.log(`\n${model}`);
 
-    for (const [fixture, expectedFails] of Object.entries(EXPECTED)) {
+    const only = argument('fixtures')?.split(',');
+    for (const [fixture, expectedFails] of Object.entries(EXPECTED).filter(([name]) => !only || only.includes(name))) {
       const browser = await openKernelBrowser();
       try {
         const url = `${base.replace(/\/$/, '')}/${fixture}/index.html`;
