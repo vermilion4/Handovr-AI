@@ -46,6 +46,8 @@ export const milestones = pgTable('milestones', {
   returnTo: text('return_to').$type<MilestoneState>(),
   /** The freelancer's share when a split was agreed. */
   splitFreelancerCents: integer('split_freelancer_cents'),
+  /** The cancelled or lapsed milestone this one starts again. */
+  restartedFromId: uuid('restarted_from_id'),
 });
 
 export const criteriaVersions = pgTable(
@@ -190,6 +192,40 @@ export const evidence = pgTable('evidence', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const settlements = pgTable('settlements', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  milestoneId: uuid('milestone_id').notNull().references(() => milestones.id),
+  submissionId: uuid('submission_id').references(() => submissions.id),
+  freelancerCents: integer('freelancer_cents').notNull(),
+  clientCents: integer('client_cents').notNull(),
+  explanation: text('explanation').notNull(),
+  clientResponse: text('client_response').$type<'accepted' | 'declined'>(),
+  freelancerResponse: text('freelancer_response').$type<'accepted' | 'declined'>(),
+  outcome: text('outcome').$type<'pending' | 'accepted' | 'declined' | 'timed_out' | 'cancelled'>().notNull().default('pending'),
+  dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+});
+
+export const notifications = pgTable('notifications', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  milestoneId: uuid('milestone_id').notNull().references(() => milestones.id),
+  kind: text('kind').notNull(),
+  subject: text('subject').notNull(),
+  body: text('body').notNull(),
+  status: text('status').$type<'sent' | 'logged' | 'failed'>().notNull(),
+  detail: text('detail').notNull().default(''),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const aiUsage = pgTable('ai_usage', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  kind: text('kind').$type<'draft' | 'rewrite' | 'verify'>().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const schema = {
   users,
   projects,
@@ -203,6 +239,9 @@ export const schema = {
   submissions,
   verdicts,
   evidence,
+  settlements,
+  notifications,
+  aiUsage,
 };
 
 /** Either the app's Postgres connection or the in-memory test database. */

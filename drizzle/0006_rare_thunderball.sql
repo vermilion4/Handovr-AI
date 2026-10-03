@@ -1,0 +1,1 @@
+ALTER TABLE "milestones" ADD COLUMN "restarted_from_id" uuid;

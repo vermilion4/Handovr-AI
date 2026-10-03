@@ -4,10 +4,10 @@ import { Icon } from '@/components/icon';
 import { TopNav } from '@/components/top-nav';
 import { db } from '@/db/client';
 import { listLedger } from '@/db/queries/ledger';
-import { ledgerRows, ledgerTotals } from '@/domain/ledger';
+import { ledgerByWeek, ledgerRows, ledgerTotals } from '@/domain/ledger';
 import { formatMoney } from '@/domain/money';
-
-const shortDate = new Intl.DateTimeFormat('en-CA', { day: 'numeric', month: 'short', year: 'numeric' });
+import { LedgerChart } from './ledger-chart';
+import { LedgerGrid } from './ledger-grid';
 
 export default async function LedgerPage() {
   const user = await getCurrentUser();
@@ -16,6 +16,7 @@ export default async function LedgerPage() {
   const ledger = await listLedger(db, user.id);
   const rows = ledgerRows(ledger.events, ledger.role);
   const totals = ledgerTotals(ledger.events, ledger.activeHolds, ledger.role);
+  const weeks = ledgerByWeek(ledger.events, ledger.role);
   const client = ledger.role === 'client';
 
   const figures = [
@@ -44,6 +45,15 @@ export default async function LedgerPage() {
           ))}
         </dl>
 
+        {weeks.length > 0 && (
+          <section className="mt-6 rounded-2xl bg-white p-5 md:p-8">
+            <h2 className="font-semibold">Money by week</h2>
+            <div className="mt-4">
+              <LedgerChart weeks={weeks} client={client} />
+            </div>
+          </section>
+        )}
+
         <section className="mt-6 rounded-2xl bg-white p-5 md:p-8">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold">Payment events</h2>
@@ -62,36 +72,18 @@ export default async function LedgerPage() {
                 : 'Nothing yet. A row appears here when a client funds one of your milestones.'}
             </p>
           ) : (
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full min-w-[720px] text-left text-sm">
-                <thead className="border-b border-line text-xs text-muted">
-                  <tr>
-                    {['Date', 'Project', 'Milestone', 'Event', 'Amount', 'PayPal reference'].map((heading) => (
-                      <th key={heading} scope="col" className="py-3 pr-4 font-normal">
-                        {heading}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line">
-                  {rows.map((row) => (
-                    <tr key={row.id}>
-                      <td className="whitespace-nowrap py-4 pr-4 text-muted">{shortDate.format(row.at)}</td>
-                      <td className="py-4 pr-4 font-semibold">{row.project}</td>
-                      <td className="py-4 pr-4">{row.milestone}</td>
-                      <td className={`py-4 pr-4 ${row.problem ? 'text-fail' : ''}`}>
-                        <span className="flex items-center gap-2">
-                          <Icon name={row.icon} size={18} />
-                          {row.label}
-                        </span>
-                      </td>
-                      <td className="py-4 pr-4 font-display font-medium">{formatMoney(row.amountCents)}</td>
-                      <td className="py-4 text-[13px] text-muted">{row.reference}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <LedgerGrid
+              rows={rows.map((row) => ({
+                id: row.id,
+                date: row.at.toISOString().slice(0, 10),
+                project: row.project,
+                milestone: row.milestone,
+                label: row.label,
+                amountCents: row.amountCents,
+                reference: row.reference,
+                problem: row.problem,
+              }))}
+            />
           )}
         </section>
       </main>

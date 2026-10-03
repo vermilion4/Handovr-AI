@@ -2,6 +2,7 @@ import { asc, eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { holds, milestones, paymentEvents, users, type Db } from '../db/schema';
 import { createTestDb } from '../db/test-db';
+import { recordingNotice } from '../notifications/notice';
 import { GatewayError } from './gateway';
 import { applyEvent } from './milestone-events';
 import { checkPayouts, processPayments, requeueStuck, retryFailedPayouts } from './processor';
@@ -64,6 +65,23 @@ describe('a full release', () => {
     expect(await events()).toEqual([['capture', 'completed'], ['payout', 'completed']]);
     expect((await eventRows())[1].detail).toBe('unclaimed');
     expect(await stateNow()).toBe('released');
+  });
+
+  it('tells both people once the payout is confirmed', async () => {
+    await releasing();
+    const notice = recordingNotice();
+    await processPayments(db, gateway, now, notice);
+    expect(notice.told).toEqual([]);
+    gateway.payoutState = { status: 'success', detail: '' };
+    await checkPayouts(db, gateway, later(1), notice);
+    expect(notice.told).toEqual([['paid', fixture.milestoneId]]);
+  });
+
+  it('tells both people when a simulated payout completes straight away', async () => {
+    await releasing({ simulated: true });
+    const notice = recordingNotice();
+    await processPayments(db, gateway, now, notice);
+    expect(notice.told).toEqual([['paid', fixture.milestoneId]]);
   });
 
   it('sends nothing twice when run again, or run twice at once', async () => {

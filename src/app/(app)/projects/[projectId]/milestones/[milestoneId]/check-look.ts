@@ -12,6 +12,7 @@ export function displayLook(display: CheckDisplay, clientFirst: string, viewerIs
     testing: { icon: 'progress_activity', label: 'Testing now', tone: 'text-paypal', bar: 'bg-hold' },
     queued: { icon: 'schedule', label: 'Queued', tone: 'text-muted', bar: 'bg-hold' },
     not_started: { icon: 'schedule', label: 'Not tested yet', tone: 'text-muted', bar: 'bg-hold' },
+    not_reviewed: { icon: 'remove', label: 'Not reviewed', tone: 'text-muted', bar: 'bg-line' },
   };
   return looks[display];
 }

@@ -2,6 +2,7 @@ import { and, desc, eq, isNotNull, lte } from 'drizzle-orm';
 import { milestones, projects, submissions, verdicts, type Db } from '../db/schema';
 import { itemsForClient, reviewOutcome, type ClientDecision } from '../domain/verification';
 import { applyEvent } from '../payments/milestone-events';
+import { proposeSettlement } from '../settlement/propose';
 import { checkOutcomes } from './outcomes';
 
 /** Thrown inside the transaction to undo it and report the reason. */
@@ -21,8 +22,8 @@ async function latestSubmission(db: Db, milestoneId: string) {
 
 export async function submitReview(
   db: Db,
-  input: { milestoneId: string; userId: string; decisions: Record<string, ClientDecision>; reason: string; now: Date },
-): Promise<{ ok: true; released: boolean } | { ok: false; reason: string }> {
+  input: { milestoneId: string; userId: string; decisions: Record<string, ClientDecision>; reason: string; now: Date; windowSeconds: number },
+): Promise<{ ok: true; released: boolean; settlement: 'proposed' | 'cancelled' | 'skipped' } | { ok: false; reason: string }> {
   try {
     return await db.transaction(async (tx) => {
       const [row] = await tx
@@ -60,7 +61,11 @@ export async function submitReview(
       const applied = await applyEvent(tx, input.milestoneId, { type: outcome === 'approved' ? 'client_approved' : 'client_rejected' }, { now: input.now });
       if (!applied.ok) throw new Refusal(applied.reason);
       await tx.update(milestones).set({ reviewDueAt: null }).where(eq(milestones.id, input.milestoneId));
-      return { ok: true as const, released: outcome === 'approved' };
+      const settlement =
+        applied.state === 'settlement_proposed'
+          ? await proposeSettlement(tx, input.milestoneId, { now: input.now, windowSeconds: input.windowSeconds })
+          : ('skipped' as const);
+      return { ok: true as const, released: outcome === 'approved', settlement };
     });
   } catch (error) {
     if (error instanceof Refusal) return { ok: false, reason: error.message };

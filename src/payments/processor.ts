@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import { holds, milestones, paymentEvents, projects, users, type Db } from '../db/schema';
+import { noNotice, type Notice } from '../notifications/notice';
 import { GatewayError, type PaymentGateway } from './gateway';
 import { applyEvent } from './milestone-events';
 
@@ -84,17 +85,19 @@ async function captureRefused(db: Db, event: PaymentEvent, hold: Hold, error: Ga
   });
 }
 
-async function confirmPayout(db: Db, event: PaymentEvent, paypalId: string, detail: string, now: Date): Promise<void> {
-  await db.transaction(async (tx) => {
+async function confirmPayout(db: Db, event: PaymentEvent, paypalId: string, detail: string, now: Date, notice: Notice): Promise<void> {
+  const released = await db.transaction(async (tx) => {
     await finish(tx, event.id, { status: 'completed', paypalId, detail }, now);
     const applied = await applyEvent(tx, event.milestoneId, { type: 'payout_confirmed' }, { now });
     if (!applied.ok) console.error(`payout_confirmed was refused for milestone ${event.milestoneId}: ${applied.reason}`);
+    return applied.ok;
   });
+  if (released) await notice('paid', event.milestoneId);
 }
 
-async function sendPayout(db: Db, gateway: PaymentGateway, event: PaymentEvent, hold: Hold, now: Date): Promise<void> {
+async function sendPayout(db: Db, gateway: PaymentGateway, event: PaymentEvent, hold: Hold, now: Date, notice: Notice): Promise<void> {
   if (hold.simulated) {
-    await confirmPayout(db, event, 'SIMULATED', '', now);
+    await confirmPayout(db, event, 'SIMULATED', '', now, notice);
     return;
   }
   const { note, email } = await describeMilestone(db, event.milestoneId);
@@ -124,7 +127,7 @@ async function sendVoid(db: Db, gateway: PaymentGateway, event: PaymentEvent, ho
   });
 }
 
-async function processOne(db: Db, gateway: PaymentGateway, eventId: string, now: Date): Promise<void> {
+async function processOne(db: Db, gateway: PaymentGateway, eventId: string, now: Date, notice: Notice): Promise<void> {
   // Taking the row from pending to sending is what stops two runs sending the same thing.
   const [event] = await db
     .update(paymentEvents)
@@ -136,7 +139,7 @@ async function processOne(db: Db, gateway: PaymentGateway, eventId: string, now:
   const [hold] = await db.select().from(holds).where(eq(holds.id, event.holdId));
   try {
     if (event.type === 'capture') await sendCapture(db, gateway, event, hold, now);
-    else if (event.type === 'payout') await sendPayout(db, gateway, event, hold, now);
+    else if (event.type === 'payout') await sendPayout(db, gateway, event, hold, now, notice);
     else if (event.type === 'void') await sendVoid(db, gateway, event, hold, now);
     else await finish(db, event.id, { status: 'failed', detail: `Nothing sends a ${event.type} row.` }, now);
   } catch (error) {
@@ -154,7 +157,7 @@ async function processOne(db: Db, gateway: PaymentGateway, eventId: string, now:
   }
 }
 
-export async function processPayments(db: Db, gateway: PaymentGateway, now: Date): Promise<void> {
+export async function processPayments(db: Db, gateway: PaymentGateway, now: Date, notice: Notice = noNotice): Promise<void> {
   // The second pass sends payouts that the first pass's captures unblocked.
   for (let pass = 0; pass < 2; pass++) {
     const due = await db
@@ -162,11 +165,11 @@ export async function processPayments(db: Db, gateway: PaymentGateway, now: Date
       .from(paymentEvents)
       .where(and(eq(paymentEvents.status, 'pending'), inArray(paymentEvents.type, QUEUED_TYPES)))
       .orderBy(asc(paymentEvents.createdAt));
-    for (const { id } of due) await processOne(db, gateway, id, now);
+    for (const { id } of due) await processOne(db, gateway, id, now, notice);
   }
 }
 
-export async function checkPayouts(db: Db, gateway: PaymentGateway, now: Date): Promise<void> {
+export async function checkPayouts(db: Db, gateway: PaymentGateway, now: Date, notice: Notice = noNotice): Promise<void> {
   const sent = await db
     .select()
     .from(paymentEvents)
@@ -175,7 +178,7 @@ export async function checkPayouts(db: Db, gateway: PaymentGateway, now: Date): 
   for (const event of sent) {
     try {
       const result = await gateway.payoutStatus(event.paypalId!);
-      if (result.status === 'success') await confirmPayout(db, event, event.paypalId!, result.detail, now);
+      if (result.status === 'success') await confirmPayout(db, event, event.paypalId!, result.detail, now, notice);
       if (result.status === 'failed') await finish(db, event.id, { status: 'failed', detail: result.detail }, now);
     } catch (error) {
       if (!(error instanceof GatewayError)) throw error;

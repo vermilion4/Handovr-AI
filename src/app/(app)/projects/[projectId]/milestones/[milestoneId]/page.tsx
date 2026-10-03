@@ -10,10 +10,13 @@ import { getMilestoneView } from '@/db/queries/milestone-view';
 import { isUuid } from '@/domain/ids';
 import { MAX_ATTEMPTS, type MilestoneState } from '@/domain/milestone-state';
 import { formatMoney } from '@/domain/money';
+import { paidCents } from '@/domain/settlement';
 import { checkDisplay, type AiVerdict, type ClientDecision } from '@/domain/verification';
 import { CheckList, type CheckItem } from './check-list';
 import { displayLook } from './check-look';
+import { RestartButton } from './restart-button';
 import { ReviewForm } from './review-form';
+import { SettlementPanel } from './settlement-panel';
 import { SubmitForm } from './submit-form';
 
 const CHIP: Record<MilestoneState, { label: string; tone: string }> = {
@@ -68,6 +71,7 @@ export default async function MilestonePage({
         clientDecision: (client?.verdict as ClientDecision | undefined) ?? null,
         isCurrent: submission?.currentCriterionId === check.id,
         running,
+        settled: view.settlement !== null,
       }),
       aiSummary: ai?.summary ?? '',
       clientSummary: client && client.verdict === 'rejected' ? client.summary : '',
@@ -81,14 +85,21 @@ export default async function MilestonePage({
   const attemptsLeft = MAX_ATTEMPTS - milestone.attemptsUsed;
   const runScreenshots = view.evidence.filter((item) => item.verdictId === null && item.hasImage);
 
+  const split = milestone.splitFreelancerCents !== null;
+  const paidText = formatMoney(paidCents(milestone));
+  const settledText = split ? 'You both accepted the split.' : 'Every check is settled.';
+
   const headline: Partial<Record<MilestoneState, string>> = {
     funded: isClient ? `Waiting for ${freelancerFirst} to submit the work.` : `${amountText} is held for this milestone.`,
     verifying: `Attempt ${submission?.attempt ?? 1} of ${MAX_ATTEMPTS}. ${passedCount} of ${checks.filter((check) => check.display !== 'yours').length} automatic checks done.`,
     client_review: `${passedCount} checks passed. ${forClient.length === 1 ? 'One is' : `${forClient.length} are`} waiting for ${isClient ? 'you' : clientFirst}.`,
     revision: `${failed.length === 1 ? 'One check' : `${failed.length} checks`} did not pass. ${attemptsLeft === 1 ? 'One attempt' : `${attemptsLeft} attempts`} left.`,
-    settlement_proposed: 'All four attempts are used. A split of the payment is proposed next.',
-    releasing: `Every check is settled. ${amountText} is on its way.`,
-    released: isClient ? `Every check is settled. ${amountText} was released.` : `Every check is settled. ${amountText} was paid to your PayPal account.`,
+    settlement_proposed:
+      failed.length === 0
+        ? 'No attempts left.'
+        : `No attempts left. ${failed.length === 1 ? `${failed[0].description} never passed.` : `${failed.length} checks never passed.`}`,
+    releasing: `${settledText} ${paidText} is on its way.`,
+    released: isClient ? `${settledText} ${paidText} was released.` : `${settledText} ${paidText} was paid to your PayPal account.`,
   };
 
   const due = milestone.reviewDueAt ? longDate.format(milestone.reviewDueAt) : null;
@@ -140,7 +151,29 @@ export default async function MilestonePage({
         </p>
       </>
     );
+  } else if (milestone.state === 'settlement_proposed' && view.settlement?.outcome === 'pending') {
+    const settlement = view.settlement;
+    panel = (
+      <SettlementPanel
+        projectId={view.project.id}
+        milestoneId={milestone.id}
+        freelancerText={formatMoney(settlement.freelancerCents)}
+        clientText={formatMoney(settlement.clientCents)}
+        freelancerName={view.freelancer.name}
+        explanation={settlement.explanation}
+        amountText={amountText}
+        mine={isClient ? settlement.clientResponse : settlement.freelancerResponse}
+        otherFirst={isClient ? freelancerFirst : clientFirst}
+        otherAccepted={(isClient ? settlement.freelancerResponse : settlement.clientResponse) === 'accepted'}
+        dueText={`If you do not both accept by ${longDate.format(settlement.dueAt)}, all ${amountText} returns to the client.`}
+      />
+    );
   } else {
+    const cancelledLine: Record<string, string> = {
+      declined: 'The split was declined, so the milestone was cancelled. The hold was returned and nothing was paid.',
+      timed_out: 'The split was not accepted in time, so the milestone was cancelled. The hold was returned and nothing was paid.',
+      cancelled: 'No check passed in the last attempt, so the milestone was cancelled. The hold was returned and nothing was paid.',
+    };
     const lines: Partial<Record<MilestoneState, string>> = {
       funded: `Waiting for ${freelancerFirst} to submit the work.`,
       revision: `Waiting for ${freelancerFirst} to fix the work and resubmit.`,
@@ -149,7 +182,7 @@ export default async function MilestonePage({
       releasing: 'PayPal is sending the payment. This usually takes under a minute.',
       signed: 'This milestone has not been funded yet.',
       drafting: 'The checks for this milestone are still being agreed.',
-      cancelled: 'This milestone was cancelled. The hold was returned and nothing was paid.',
+      cancelled: cancelledLine[view.settlement?.outcome ?? ''] ?? 'This milestone was cancelled. The hold was returned and nothing was paid.',
       lapsed: 'The hold expired before the work was released. Nothing was paid.',
       funding_problem: 'The hold could not be collected. The client needs to fund again.',
     };
@@ -158,7 +191,7 @@ export default async function MilestonePage({
         <>
           <h2 className="flex items-center gap-2 font-semibold">
             <Icon name="payments" size={20} />
-            Paid to {view.freelancer.email}
+            {split ? `Paid ${paidText} to ${view.freelancer.email}` : `Paid to ${view.freelancer.email}`}
           </h2>
           <ul className="mt-4 space-y-2 text-sm">
             {view.payments
@@ -175,7 +208,18 @@ export default async function MilestonePage({
           </ul>
         </>
       ) : (
-        <p className="text-sm">{lines[milestone.state] ?? ''}</p>
+        <>
+          <p className="text-sm">{lines[milestone.state] ?? ''}</p>
+          {(milestone.state === 'cancelled' || milestone.state === 'lapsed') && isClient && !milestone.restartedAs && (
+            <RestartButton projectId={view.project.id} milestoneId={milestone.id} freelancerFirst={freelancerFirst} />
+          )}
+          {milestone.restartedAs && (
+            <Link href={`/projects/${view.project.id}/milestones/${milestone.restartedAs}`} className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-paypal">
+              <Icon name="restart_alt" size={18} />
+              Open the new milestone
+            </Link>
+          )}
+        </>
       );
   }
 
@@ -190,6 +234,9 @@ export default async function MilestonePage({
           / Milestone {milestone.position}
         </p>
         <h1 className="mt-2 font-display text-2xl font-medium md:text-[28px]">{milestone.title}</h1>
+        {milestone.restartedFromPosition !== null && (
+          <p className="mt-1 text-[13px] text-muted">Starts again from milestone {milestone.restartedFromPosition}</p>
+        )}
 
         <div className="mt-4 flex flex-wrap items-center gap-4">
           <p className="font-display text-5xl font-medium md:text-6xl">{amountText}</p>

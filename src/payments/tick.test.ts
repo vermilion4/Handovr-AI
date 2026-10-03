@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { holds, milestones, paymentEvents, type Db } from '../db/schema';
 import { createTestDb } from '../db/test-db';
+import { recordingNotice } from '../notifications/notice';
 import { GatewayError } from './gateway';
 import { applyEvent } from './milestone-events';
 import { fakeGateway, setupMilestone, type FakeGateway } from './testing';
@@ -71,6 +72,13 @@ describe('runTick: holds over time', () => {
     expect(await runTick(db, gateway, day(29))).toMatchObject({ expired: 1 });
     expect((await holdRow(holdId!)).status).toBe('expired');
     expect(await stateOf(milestoneId)).toBe('lapsed');
+  });
+
+  it('tells both people when a hold expires', async () => {
+    const { milestoneId } = await setupMilestone(db, { state: 'revision', authorizedAt });
+    const notice = recordingNotice();
+    await runTick(db, gateway, day(29), notice);
+    expect(notice.told).toEqual([['cancelled', milestoneId]]);
   });
 
   it('does not lapse a milestone that is already being released', async () => {

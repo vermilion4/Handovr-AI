@@ -365,7 +365,7 @@ export async function acknowledgeVersion(
 export async function signMilestones(
   db: Db,
   input: { projectId: string; userId: string; versionIds: string[]; typedName: string; agreed: boolean; now: Date },
-): Promise<{ ok: true; signed: number; completed: number } | { ok: false; reason: string }> {
+): Promise<{ ok: true; signed: number; completed: number; completedIds: string[] } | { ok: false; reason: string }> {
   if (!input.agreed) return { ok: false, reason: 'Tick the box to agree before signing.' };
   const versionIds = [...new Set(input.versionIds)].sort();
   if (versionIds.length === 0) return { ok: false, reason: 'Choose at least one milestone to sign.' };
@@ -381,7 +381,7 @@ export async function signMilestones(
         throw new Refusal(`Type your full name as it appears on your account: ${user.name}.`);
       }
 
-      let completed = 0;
+      const completedIds: string[] = [];
       for (const versionId of versionIds) {
         const [version] = await tx.select().from(criteriaVersions).where(eq(criteriaVersions.id, versionId)).limit(1);
         const [milestone] = version
@@ -421,10 +421,10 @@ export async function signMilestones(
           );
           if (!result.ok) throw new Refusal(result.reason);
           await tx.update(milestones).set({ state: result.context.state }).where(eq(milestones.id, milestone.id));
-          completed += 1;
+          completedIds.push(milestone.id);
         }
       }
-      return { ok: true as const, signed: versionIds.length, completed };
+      return { ok: true as const, signed: versionIds.length, completed: completedIds.length, completedIds };
     }),
   );
 }

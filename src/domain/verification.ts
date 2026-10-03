@@ -89,7 +89,8 @@ export type CheckDisplay =
   | 'changes_requested'
   | 'testing'
   | 'queued'
-  | 'not_started';
+  | 'not_started'
+  | 'not_reviewed';
 
 export function checkDisplay(input: {
   kind: 'machine' | 'human';
@@ -97,10 +98,13 @@ export function checkDisplay(input: {
   clientDecision: ClientDecision | null;
   isCurrent: boolean;
   running: boolean;
+  /** A split has been proposed, so nothing more will be decided. */
+  settled: boolean;
 }): CheckDisplay {
   if (input.clientDecision) return input.clientDecision === 'approved' ? 'approved' : 'changes_requested';
   if (input.aiVerdict === 'pass') return 'passed';
   if (input.aiVerdict === 'fail') return 'failed';
+  if (input.settled) return 'not_reviewed';
   if (input.aiVerdict === 'unclear') return 'unclear';
   if (input.kind === 'human') return 'yours';
   if (input.running) return input.isCurrent ? 'testing' : 'queued';

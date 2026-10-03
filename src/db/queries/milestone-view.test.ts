@@ -1,6 +1,8 @@
+import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { restartMilestone } from '../../settlement/restart';
 import { setupVerification, type VerificationFixture } from '../../verification/testing';
-import { evidence, submissions, verdicts, type Db } from '../schema';
+import { evidence, milestones, settlements, submissions, verdicts, type Db } from '../schema';
 import { createTestDb } from '../test-db';
 import { getMilestoneView } from './milestone-view';
 
@@ -13,6 +15,42 @@ beforeEach(async () => {
 });
 
 describe('getMilestoneView', () => {
+  it('includes the latest split', async () => {
+    await db.insert(settlements).values({
+      milestoneId: fixture.milestoneId,
+      freelancerCents: 48000,
+      clientCents: 12000,
+      explanation: 'Three of four passed.',
+      freelancerResponse: 'accepted',
+      dueAt: new Date('2026-10-21T12:00:00Z'),
+    });
+    const view = await getMilestoneView(db, fixture.projectId, fixture.milestoneId, fixture.clientId);
+    expect(view?.settlement).toMatchObject({
+      freelancerCents: 48000,
+      clientCents: 12000,
+      explanation: 'Three of four passed.',
+      freelancerResponse: 'accepted',
+      clientResponse: null,
+      outcome: 'pending',
+    });
+  });
+
+  it('links a milestone and the copy that starts it again', async () => {
+    await db.update(milestones).set({ state: 'cancelled' }).where(eq(milestones.id, fixture.milestoneId));
+    expect((await getMilestoneView(db, fixture.projectId, fixture.milestoneId, fixture.clientId))?.milestone).toMatchObject({
+      restartedAs: null,
+      restartedFromPosition: null,
+    });
+    const restarted = await restartMilestone(db, { milestoneId: fixture.milestoneId, userId: fixture.clientId, now: new Date() });
+    if (!restarted.ok) throw new Error(restarted.reason);
+    expect((await getMilestoneView(db, fixture.projectId, fixture.milestoneId, fixture.clientId))?.milestone.restartedAs).toBe(restarted.milestoneId);
+    expect((await getMilestoneView(db, fixture.projectId, restarted.milestoneId, fixture.clientId))?.milestone.restartedFromPosition).toBe(1);
+  });
+
+  it('has no split before one is proposed', async () => {
+    expect((await getMilestoneView(db, fixture.projectId, fixture.milestoneId, fixture.clientId))?.settlement).toBeNull();
+  });
+
   it('returns the milestone, its signed checks and the latest submission with its verdicts and evidence', async () => {
     await db.insert(submissions).values({ milestoneId: fixture.milestoneId, attempt: 1, url: 'https://old.example', status: 'failed', createdAt: new Date('2026-10-10') });
     const [latest] = await db

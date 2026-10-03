@@ -1,0 +1,521 @@
+{
+  "info": {
+    "name": "Handovr.ai PayPal calls",
+    "description": "Every PayPal sandbox call Handovr makes, in the order a milestone uses them, with the same headers and body shapes as src/payments/paypal.ts. Fill client_id and client_secret, run 1, then 2. Approve the order in a browser with a sandbox buyer before running 3.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://api-m.sandbox.paypal.com"
+    },
+    {
+      "key": "client_id",
+      "value": ""
+    },
+    {
+      "key": "client_secret",
+      "value": ""
+    },
+    {
+      "key": "access_token",
+      "value": ""
+    },
+    {
+      "key": "order_id",
+      "value": ""
+    },
+    {
+      "key": "authorization_id",
+      "value": ""
+    },
+    {
+      "key": "payout_batch_id",
+      "value": ""
+    },
+    {
+      "key": "webhook_id",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Get an access token",
+      "request": {
+        "method": "POST",
+        "auth": {
+          "type": "basic",
+          "basic": [
+            {
+              "key": "username",
+              "value": "{{client_id}}",
+              "type": "string"
+            },
+            {
+              "key": "password",
+              "value": "{{client_secret}}",
+              "type": "string"
+            }
+          ]
+        },
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/x-www-form-urlencoded"
+          }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "grant_type",
+              "value": "client_credentials"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/v1/oauth2/token",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "oauth2",
+            "token"
+          ]
+        },
+        "description": "Handovr asks for an app token before any other call, and reuses it until a minute before it expires."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('access_token', pm.response.json().access_token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Create the hold order",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Prefer",
+            "value": "return=representation"
+          },
+          {
+            "key": "PayPal-Request-Id",
+            "value": "{{$guid}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v2/checkout/orders",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v2",
+            "checkout",
+            "orders"
+          ]
+        },
+        "description": "When the client presses Fund, Handovr creates an order that authorises the milestone amount plus PayPal's fee, then sends the client to the payer-action link to approve it.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"intent\": \"AUTHORIZE\",\n  \"purchase_units\": [\n    {\n      \"description\": \"Chen's Bakery website: Contact page\",\n      \"amount\": {\n        \"currency_code\": \"CAD\",\n        \"value\": \"618.23\"\n      }\n    }\n  ],\n  \"payment_source\": {\n    \"paypal\": {\n      \"experience_context\": {\n        \"brand_name\": \"Handovr.ai\",\n        \"user_action\": \"PAY_NOW\",\n        \"shipping_preference\": \"NO_SHIPPING\",\n        \"return_url\": \"https://handovr-drxq.onrender.com/api/paypal/return?hold=HOLD_ID\",\n        \"cancel_url\": \"https://handovr-drxq.onrender.com/api/paypal/cancel?hold=HOLD_ID\"\n      }\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('order_id', pm.response.json().id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Authorise the order",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Prefer",
+            "value": "return=representation"
+          },
+          {
+            "key": "PayPal-Request-Id",
+            "value": "{{$guid}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v2/checkout/orders/{{order_id}}/authorize",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v2",
+            "checkout",
+            "orders",
+            "{{order_id}}",
+            "authorize"
+          ]
+        },
+        "description": "When PayPal sends the client back, Handovr places the hold. If an earlier try already did, it reads the order back instead.",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const auth = pm.response.json().purchase_units?.[0]?.payments?.authorizations?.[0];",
+              "if (auth) pm.collectionVariables.set('authorization_id', auth.id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Reauthorise",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Prefer",
+            "value": "return=representation"
+          },
+          {
+            "key": "PayPal-Request-Id",
+            "value": "{{$guid}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v2/payments/authorizations/{{authorization_id}}/reauthorize",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v2",
+            "payments",
+            "authorizations",
+            "{{authorization_id}}",
+            "reauthorize"
+          ]
+        },
+        "description": "On day 25 of a hold, the tick renews it once so it lasts until the work is done.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": {\n    \"currency_code\": \"CAD\",\n    \"value\": \"618.23\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const id = pm.response.json().id;",
+              "if (id) pm.collectionVariables.set('authorization_id', id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Capture",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Prefer",
+            "value": "return=representation"
+          },
+          {
+            "key": "PayPal-Request-Id",
+            "value": "{{$guid}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v2/payments/authorizations/{{authorization_id}}/capture",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v2",
+            "payments",
+            "authorizations",
+            "{{authorization_id}}",
+            "capture"
+          ]
+        },
+        "description": "When the work passes, or both people accept a split, Handovr captures the hold: all of it, or the freelancer's share plus fee.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": {\n    \"currency_code\": \"CAD\",\n    \"value\": \"618.23\"\n  },\n  \"final_capture\": true,\n  \"note_to_payer\": \"Chen's Bakery website: Contact page\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "6. Void",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Prefer",
+            "value": "return=representation"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v2/payments/authorizations/{{authorization_id}}/void",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v2",
+            "payments",
+            "authorizations",
+            "{{authorization_id}}",
+            "void"
+          ]
+        },
+        "description": "When a milestone is cancelled, or a split is declined or runs out of time, Handovr returns the hold to the client."
+      }
+    },
+    {
+      "name": "7. Authorisation status",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Prefer",
+            "value": "return=representation"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v2/payments/authorizations/{{authorization_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v2",
+            "payments",
+            "authorizations",
+            "{{authorization_id}}"
+          ]
+        },
+        "description": "When PayPal reports a hold voided outside Handovr, Handovr reads the hold to confirm before acting."
+      }
+    },
+    {
+      "name": "8. Send the payout",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Prefer",
+            "value": "return=representation"
+          },
+          {
+            "key": "PayPal-Request-Id",
+            "value": "{{$guid}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v1/payments/payouts",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "payments",
+            "payouts"
+          ]
+        },
+        "description": "After a capture, Handovr pays the freelancer's PayPal email. The batch id is the payout row's own id, so a retry can never pay twice.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"sender_batch_header\": {\n    \"sender_batch_id\": \"{{$guid}}\",\n    \"email_subject\": \"Your Handovr.ai milestone payment\",\n    \"email_message\": \"Chen's Bakery website: Contact page\"\n  },\n  \"items\": [\n    {\n      \"recipient_type\": \"EMAIL\",\n      \"receiver\": \"freelancer@personal.example.com\",\n      \"amount\": {\n        \"currency\": \"CAD\",\n        \"value\": \"600.00\"\n      },\n      \"note\": \"Chen's Bakery website: Contact page\",\n      \"sender_item_id\": \"{{$guid}}\"\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const id = pm.response.json().batch_header?.payout_batch_id;",
+              "if (id) pm.collectionVariables.set('payout_batch_id', id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Payout status",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Prefer",
+            "value": "return=representation"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v1/payments/payouts/{{payout_batch_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "payments",
+            "payouts",
+            "{{payout_batch_id}}"
+          ]
+        },
+        "description": "The tick, and any payout webhook, read the batch to learn whether the payment arrived, was left unclaimed or failed."
+      }
+    },
+    {
+      "name": "10. Verify a webhook signature",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Prefer",
+            "value": "return=representation"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v1/notifications/verify-webhook-signature",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "notifications",
+            "verify-webhook-signature"
+          ]
+        },
+        "description": "Every webhook is checked with PayPal before Handovr treats it as a reason to re-read a payout or hold.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"auth_algo\": \"SHA256withRSA\",\n  \"cert_url\": \"https://api.sandbox.paypal.com/v1/notifications/certs/CERT-ID\",\n  \"transmission_id\": \"TRANSMISSION-ID\",\n  \"transmission_sig\": \"SIGNATURE\",\n  \"transmission_time\": \"2026-10-20T12:00:00Z\",\n  \"webhook_id\": \"{{webhook_id}}\",\n  \"webhook_event\": {\n    \"id\": \"WH-EXAMPLE\",\n    \"event_type\": \"PAYMENT.PAYOUTS-ITEM.SUCCEEDED\",\n    \"resource\": {}\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

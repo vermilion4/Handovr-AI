@@ -1,7 +1,9 @@
 import { after } from 'next/server';
 import { db } from '@/db/client';
+import { liveNotice } from '@/notifications/live';
 import { liveGateway } from '@/payments/live';
 import { runTick, validTickKey } from '@/payments/tick';
+import { expireSettlements } from '@/settlement/respond';
 import { liveVerificationDeps } from '@/verification/live';
 import { verificationsToRun } from '@/verification/restart';
 import { expireReviews } from '@/verification/review';
@@ -16,7 +18,9 @@ export async function GET(request: Request) {
   const now = new Date();
   // Reviews end first, so the releases they start are sent in this same tick.
   const reviewsReleased = await expireReviews(db, now);
-  const report = await runTick(db, liveGateway(), now);
+  const notice = liveNotice(db);
+  const settlementsExpired = await expireSettlements(db, now, notice);
+  const report = await runTick(db, liveGateway(), now, notice);
   const toRun = await verificationsToRun(db, now);
 
   if (toRun.length > 0) {
@@ -29,7 +33,7 @@ export async function GET(request: Request) {
   }
 
   return Response.json(
-    { ...report, reviewsReleased, runsStarted: toRun.length },
+    { ...report, reviewsReleased, settlementsExpired, runsStarted: toRun.length },
     { status: report.errors.length ? 500 : 200 },
   );
 }
