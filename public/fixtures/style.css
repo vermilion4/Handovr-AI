@@ -1,0 +1,13 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; color: #3a2a1a; background: #fffaf2; }
+header { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; background: #6b3f1f; color: #fff; }
+header a { color: #fff; margin-left: 16px; text-decoration: none; }
+main { max-width: 960px; margin: 0 auto; padding: 32px 24px; display: grid; gap: 32px; grid-template-columns: 1fr; }
+@media (min-width: 800px) { main { grid-template-columns: 1fr 1fr; } }
+label { display: block; margin-top: 12px; font-weight: 600; }
+input, textarea { width: 100%; padding: 10px; border: 1px solid #c9b8a4; border-radius: 6px; font: inherit; }
+button { margin-top: 16px; padding: 12px 24px; border: 0; border-radius: 6px; background: #d9792b; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.confirmation { margin-top: 16px; padding: 12px; background: #e6f4ea; border-radius: 6px; }
+.hidden { display: none; }
+table { border-collapse: collapse; width: 100%; }
+td { padding: 6px 0; border-bottom: 1px solid #eadfce; }

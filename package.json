@@ -15,11 +15,13 @@
     "db:start": "LC_ALL=C pg_ctl -D .pgdata -o \"-p 5433 -c listen_addresses=localhost\" -l .pgdata/server.log start",
     "db:stop": "pg_ctl -D .pgdata stop",
     "demo:advance": "tsx --env-file=.env.local scripts/advance.ts",
+    "eval:verification": "tsx --env-file=.env.local scripts/eval-verification.ts",
     "db:studio": "node --env-file=.env.local node_modules/drizzle-kit/bin.cjs studio"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
     "@onkernel/sdk": "^0.117.0",
+    "axe-core": "^4.13.0",
     "drizzle-orm": "^0.45.3",
     "material-symbols": "^0.47.6",
     "next": "16.3.8",
@@ -31,7 +33,7 @@
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^22.20.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "drizzle-kit": "^0.31.11",

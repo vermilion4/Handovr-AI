@@ -22,6 +22,20 @@
       "when": 1790969019059,
       "tag": "0002_cooing_sandman",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790988881683,
+      "tag": "0003_mixed_ravenous",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790989668670,
+      "tag": "0004_black_xorn",
+      "breakpoints": true
     }
   ]
 }

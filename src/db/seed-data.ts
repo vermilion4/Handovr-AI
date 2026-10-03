@@ -1,3 +1,4 @@
+import { asc, eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import type { CriterionCategory, CriterionKind } from '../domain/criteria';
 import type { MilestoneState } from '../domain/milestone-state';
@@ -6,12 +7,15 @@ import { allocateShares } from '../domain/shares';
 import {
   criteria,
   criteriaVersions,
+  evidence,
   holds,
   milestones,
   paymentEvents,
   projects,
   signatures,
+  submissions,
   users,
+  verdicts,
   type Db,
 } from './schema';
 
@@ -218,6 +222,73 @@ async function insertMoneyHistory(
   ]);
 }
 
+const TESTED_STATES: ReadonlySet<MilestoneState> = new Set(['verifying', 'client_review', 'revision', 'releasing', 'released']);
+
+/** A simulated submission with the verdicts that brought a seeded milestone to its state. */
+async function insertTestHistory(
+  db: Db,
+  milestone: { id: string; state: MilestoneState },
+  versionId: string,
+  projectCreatedAt: Date,
+  position: number,
+): Promise<void> {
+  if (!TESTED_STATES.has(milestone.state)) return;
+
+  const checks = await db.select().from(criteria).where(eq(criteria.versionId, versionId)).orderBy(asc(criteria.position));
+  const machine = checks.filter((check) => check.kind === 'machine');
+  const submittedAt = new Date(projectCreatedAt.getTime() + (position * 3 + 1) * DAY_MS);
+  const testing = milestone.state === 'verifying';
+  const done = testing ? machine.slice(0, 2) : machine;
+
+  const [submission] = await db
+    .insert(submissions)
+    .values({
+      milestoneId: milestone.id,
+      attempt: 1,
+      url: 'https://preview.chensbakery.example/contact',
+      status: testing ? 'running' : 'passed',
+      simulated: true,
+      tries: 1,
+      currentCriterionId: testing ? (machine[2]?.id ?? null) : null,
+      progressNote: testing && machine[2] ? `Testing: ${machine[2].description}` : '',
+      createdAt: submittedAt,
+      startedAt: submittedAt,
+      finishedAt: testing ? null : new Date(submittedAt.getTime() + 4 * 60_000),
+    })
+    .returning({ id: submissions.id });
+
+  for (const check of done) {
+    const [verdict] = await db
+      .insert(verdicts)
+      .values({
+        submissionId: submission.id,
+        criterionId: check.id,
+        source: 'ai',
+        verdict: 'pass',
+        summary: `Ran the agreed test: ${check.testPlan} The result met it.`,
+        createdAt: submittedAt,
+      })
+      .returning({ id: verdicts.id });
+    if (check.category === 'performance') {
+      await db.insert(evidence).values({ submissionId: submission.id, verdictId: verdict.id, kind: 'timing', caption: 'Load times', text: '2.1, 2.4, 2.2 seconds' });
+    }
+  }
+
+  if (milestone.state === 'released' || milestone.state === 'releasing') {
+    await db.insert(verdicts).values(
+      checks
+        .filter((check) => check.kind === 'human')
+        .map((check) => ({ submissionId: submission.id, criterionId: check.id, source: 'client' as const, verdict: 'approved' as const, summary: 'Approved by the client.', createdAt: submittedAt })),
+    );
+  }
+  if (milestone.state === 'client_review') {
+    await db
+      .update(milestones)
+      .set({ reviewDueAt: new Date(Date.now() + 5 * DAY_MS) })
+      .where(eq(milestones.id, milestone.id));
+  }
+}
+
 export async function seedDemo(db: Db): Promise<{ mayaId: string; tomasId: string; lonelyId: string }> {
   const ids = new Map<string, string>();
   for (const [key, name, email, role] of PEOPLE) {
@@ -247,6 +318,8 @@ export async function seedDemo(db: Db): Promise<{ mayaId: string; tomasId: strin
           amountCents,
           state,
           criteriaDraft,
+          attemptsUsed: TESTED_STATES.has(state) && state !== 'verifying' ? 1 : 0,
+          submittedFrom: state === 'verifying' ? ('funded' as const) : null,
         })),
       )
       .returning();
@@ -256,6 +329,7 @@ export async function seedDemo(db: Db): Promise<{ mayaId: string; tomasId: strin
       if (milestone.criteriaDraft !== 'ready') continue;
       const keys = CHECKS.map(() => randomUUID());
       const versionId = await insertList(db, milestone.id, milestone.amountCents, 1, null, '', CHECKS, keys);
+      await insertTestHistory(db, milestone, versionId, new Date(project.createdAt), milestone.position);
 
       if (milestone.state !== 'drafting') {
         await db.insert(signatures).values(

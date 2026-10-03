@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { holdTotalCents } from '../domain/hold';
 import { ledgerRows, ledgerTotals } from '../domain/ledger';
 import { listLedger } from './queries/ledger';
+import { getMilestoneView } from './queries/milestone-view';
 import { holds } from './schema';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { contractStatus } from '../domain/contract';
@@ -78,5 +79,26 @@ describe('seedDemo', () => {
       releasedCents: 90000 + 50000 + 70000 + 70000 + 80000,
       returnedCents: 0,
     });
+  });
+
+  it('gives the milestone waiting for review a passed submission and a review deadline', async () => {
+    const contract = await contractOf("Chen's Bakery website");
+    const contact = contract.milestones.find((milestone) => milestone.title === 'Contact page')!;
+    const view = (await getMilestoneView(db, contract.project.id, contact.id, people.mayaId))!;
+
+    expect(view.submission).toMatchObject({ status: 'passed', attempt: 1 });
+    expect(view.milestone.reviewDueAt).not.toBeNull();
+    const machine = view.criteria.filter((check) => check.kind === 'machine').map((check) => check.id);
+    expect(view.verdicts.filter((verdict) => verdict.source === 'ai').map((verdict) => verdict.criterionId).sort()).toEqual([...machine].sort());
+    expect(view.verdicts.every((verdict) => verdict.verdict === 'pass')).toBe(true);
+  });
+
+  it('shows the milestones being tested part way through, and never runs them', async () => {
+    const catering = await contractOf('Catering enquiry site');
+    const form = catering.milestones[0];
+    const view = (await getMilestoneView(db, catering.project.id, form.id, people.mayaId))!;
+    expect(view.submission).toMatchObject({ status: 'running' });
+    expect(view.submission!.currentCriterionId).not.toBeNull();
+    expect(view.verdicts.length).toBeGreaterThan(0);
   });
 });
