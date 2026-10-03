@@ -1,5 +1,6 @@
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
-import { integer, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import { boolean, integer, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import type { HoldStatus, PaymentStatus, PaymentType } from '../domain/payments';
 import type { DraftStatus } from '../domain/contract';
 import type { CriterionCategory, CriterionKind } from '../domain/criteria';
 import type { MilestoneState } from '../domain/milestone-state';
@@ -37,6 +38,13 @@ export const milestones = pgTable('milestones', {
   criteriaDraftStartedAt: timestamp('criteria_draft_started_at', { withTimezone: true }),
   attemptsUsed: integer('attempts_used').notNull().default(0),
   reviewDueAt: timestamp('review_due_at', { withTimezone: true }),
+  /** The state the current submission was made from. */
+  submittedFrom: text('submitted_from').$type<'funded' | 'revision'>(),
+  releaseKind: text('release_kind').$type<'full' | 'split'>(),
+  /** The state to go back to once a funding problem is fixed. */
+  returnTo: text('return_to').$type<MilestoneState>(),
+  /** The freelancer's share when a split was agreed. */
+  splitFreelancerCents: integer('split_freelancer_cents'),
 });
 
 export const criteriaVersions = pgTable(
@@ -82,7 +90,60 @@ export const signatures = pgTable(
   (table) => [unique().on(table.versionId, table.userId)],
 );
 
-export const schema = { users, projects, milestones, criteriaVersions, criteria, signatures };
+export const holds = pgTable('holds', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  milestoneId: uuid('milestone_id').notNull().references(() => milestones.id),
+  /** Sent to PayPal as the idempotency key when the order is created. */
+  requestId: uuid('request_id').notNull(),
+  paypalOrderId: text('paypal_order_id').notNull(),
+  authorizationId: text('authorization_id'),
+  /** The milestone amount this hold covers. */
+  amountCents: integer('amount_cents').notNull(),
+  /** The amount held: the milestone amount plus PayPal's fee. */
+  totalCents: integer('total_cents').notNull(),
+  status: text('status').$type<HoldStatus>().notNull().default('awaiting_approval'),
+  /** Demo data only: money events complete without calling PayPal. */
+  simulated: boolean('simulated').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  authorizedAt: timestamp('authorized_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  renewedAt: timestamp('renewed_at', { withTimezone: true }),
+});
+
+export const paymentEvents = pgTable('payment_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  milestoneId: uuid('milestone_id').notNull().references(() => milestones.id),
+  holdId: uuid('hold_id').notNull().references(() => holds.id),
+  type: text('type').$type<PaymentType>().notNull(),
+  status: text('status').$type<PaymentStatus>().notNull(),
+  amountCents: integer('amount_cents').notNull(),
+  /** Sent to PayPal as the idempotency key, or as the payout batch id. */
+  requestId: uuid('request_id').notNull().defaultRandom(),
+  /** PayPal's id for the authorisation, capture or payout batch. */
+  paypalId: text('paypal_id'),
+  detail: text('detail').notNull().default(''),
+  attempts: integer('attempts').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const webhookEvents = pgTable('webhook_events', {
+  paypalEventId: text('paypal_event_id').primaryKey(),
+  eventType: text('event_type').notNull(),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const schema = {
+  users,
+  projects,
+  milestones,
+  criteriaVersions,
+  criteria,
+  signatures,
+  holds,
+  paymentEvents,
+  webhookEvents,
+};
 
 /** Either the app's Postgres connection or the in-memory test database. */
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;

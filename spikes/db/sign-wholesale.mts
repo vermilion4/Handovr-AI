@@ -1,0 +1,20 @@
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
+import { eq } from 'drizzle-orm';
+const R = '../../src';
+const { schema, users, projects } = await import(`${R}/db/schema.ts`);
+const q = await import(`${R}/db/queries/contract.ts`);
+
+const sql = postgres(process.env.DATABASE_URL!, { max: 2 });
+const db = drizzle({ client: sql, schema });
+const [maya] = await db.select().from(users).where(eq(users.email, 'maya@chensbakery.example'));
+const [tomas] = await db.select().from(users).where(eq(users.email, 'tomas@riverastudio.example'));
+const [project] = await db.select().from(projects).where(eq(projects.title, 'Wholesale order portal'));
+let contract = await q.getContract(db, project.id, maya.id);
+await q.acknowledgeVersion(db, { versionId: contract.milestones[0].version.id, userId: maya.id, now: new Date() });
+contract = await q.getContract(db, project.id, maya.id);
+const versionIds = contract.milestones.map((m) => m.version.id);
+console.log(await q.signMilestones(db, { projectId: project.id, userId: maya.id, versionIds, typedName: 'Maya Chen', agreed: true, now: new Date() }));
+console.log(await q.signMilestones(db, { projectId: project.id, userId: tomas.id, versionIds, typedName: 'Tomas Rivera', agreed: true, now: new Date() }));
+console.log(project.id, contract.milestones.map((m) => m.id).join(' '));
+await sql.end();

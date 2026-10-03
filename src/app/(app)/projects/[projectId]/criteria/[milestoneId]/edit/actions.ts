@@ -75,5 +75,5 @@ export async function saveEditAction(
   if (!result.ok) return { error: result.reason };
 
   revalidatePath(`/projects/${projectId}/criteria`);
-  redirect(`/projects/${projectId}/criteria`);
+  redirect(`/projects/${projectId}/criteria?saved=${milestoneId}`);
 }

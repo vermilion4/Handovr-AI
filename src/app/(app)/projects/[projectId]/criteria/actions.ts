@@ -62,7 +62,7 @@ export async function signAction(
   versionIds: string[],
   typedName: string,
   agreed: boolean,
-): Promise<ActionResult> {
+): Promise<ActionResult & { signed?: number; completed?: number }> {
   const user = await viewer();
   if (!uuid(projectId) || !Array.isArray(versionIds) || !versionIds.every(uuid)) {
     return { error: 'Those milestones could not be read. Reload the page and try again.' };
@@ -78,5 +78,5 @@ export async function signAction(
   });
   if (!result.ok) return { error: result.reason };
   revalidatePath(`/projects/${projectId}/criteria`);
-  return {};
+  return { signed: result.signed, completed: result.completed };
 }

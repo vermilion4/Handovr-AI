@@ -27,7 +27,7 @@ export function SignDialog({
   otherFirst: string;
   today: string;
   onClose: () => void;
-  onSigned: () => void;
+  onSigned: (outcome: { signed: number; completed: number }) => void;
 }>) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [name, setName] = useState('');
@@ -56,7 +56,7 @@ export function SignDialog({
       }
       setName('');
       setAgreed(false);
-      onSigned();
+      onSigned({ signed: result.signed ?? chosen.length, completed: result.completed ?? 0 });
     });
   }
 
