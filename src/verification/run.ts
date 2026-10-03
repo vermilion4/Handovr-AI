@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { evidence, milestones, submissions, verdicts, type Db } from '../db/schema';
-import { combineRuns, itemsForClient, verificationOutcome, type AiVerdict } from '../domain/verification';
+import { allMachineUnclear, combineRuns, itemsForClient, verificationOutcome, type AiVerdict } from '../domain/verification';
 import { applyEvent } from '../payments/milestone-events';
 import { runCheck, type CheckRun, type CreateMessage, type EvidenceItem } from './agent';
 import type { BrowserTools } from './browser';
@@ -8,6 +8,8 @@ import { checkOutcomes, signedChecks } from './outcomes';
 
 export const MAX_RUN_TRIES = 2;
 const LEFT_FOR_CLIENT = 'The test run could not finish, so this check is left for the client.';
+const NOTHING_DECIDED =
+  'The tester could not complete any of the automatic checks, so nothing was decided. No attempt was used. Check that the site works and submit again.';
 
 export interface VerificationDeps {
   openBrowser(): Promise<BrowserTools>;
@@ -88,7 +90,12 @@ async function markUnreachable(db: Db, deps: VerificationDeps, submission: Submi
   await db.transaction(async (tx) => {
     const [row] = await tx
       .update(submissions)
-      .set({ status: 'unreachable', finishedAt: deps.now(), currentCriterionId: null, progressNote: `The site could not be opened (${reason}).` })
+      .set({
+        status: 'unreachable',
+        finishedAt: deps.now(),
+        currentCriterionId: null,
+        progressNote: `The site could not be opened (${reason}). No attempt was used. Check the address and submit again.`,
+      })
       .where(held(submission))
       .returning({ id: submissions.id });
     if (!row) throw new LostClaim();
@@ -98,7 +105,7 @@ async function markUnreachable(db: Db, deps: VerificationDeps, submission: Submi
 }
 
 /** Records the result and moves the milestone on, all or nothing. */
-async function finish(db: Db, deps: VerificationDeps, submission: Submission): Promise<'passed' | 'failed'> {
+async function finish(db: Db, deps: VerificationDeps, submission: Submission): Promise<'passed' | 'failed' | 'unreachable'> {
   const now = deps.now();
   const { result, released } = await db.transaction(async (tx) => {
     const [milestone] = await tx.select().from(milestones).where(eq(milestones.id, submission.milestoneId)).for('update');
@@ -113,6 +120,18 @@ async function finish(db: Db, deps: VerificationDeps, submission: Submission): P
     }
 
     const outcomes = await checkOutcomes(tx, submission.milestoneId, submission.id);
+    if (allMachineUnclear(outcomes)) {
+      // A run that decided nothing goes back to the freelancer, like an address that would not open.
+      const [row] = await tx
+        .update(submissions)
+        .set({ status: 'unreachable', finishedAt: now, currentCriterionId: null, progressNote: NOTHING_DECIDED, heartbeatAt: now })
+        .where(held(submission))
+        .returning({ id: submissions.id });
+      if (!row) throw new LostClaim();
+      const applied = await applyEvent(tx, submission.milestoneId, { type: 'site_unreachable' }, { now });
+      if (!applied.ok) throw new Paused();
+      return { result: 'unreachable' as const, released: false };
+    }
     const result = verificationOutcome(outcomes);
     const [row] = await tx
       .update(submissions)

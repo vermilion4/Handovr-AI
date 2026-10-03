@@ -92,6 +92,8 @@ export default async function MilestonePage({
   };
 
   const due = milestone.reviewDueAt ? longDate.format(milestone.reviewDueAt) : null;
+  const showLedger = milestone.state === 'released';
+  const showReplay = Boolean(submission?.replayUrl) && milestone.state !== 'verifying';
 
   let panel: React.ReactNode;
   if ((milestone.state === 'funded' || milestone.state === 'revision') && !isClient) {
@@ -100,7 +102,7 @@ export default async function MilestonePage({
         <h2 className="font-display text-lg font-medium">{milestone.state === 'revision' ? 'Resubmit the work' : 'Submit the work'}</h2>
         {submission?.status === 'unreachable' && (
           <p role="alert" className="mt-3 rounded-xl bg-fail/10 px-4 py-3 text-sm text-fail">
-            {submission.progressNote} No attempt was used. Check the address and submit again.
+            {submission.progressNote}
           </p>
         )}
         <div className="mt-4">
@@ -171,9 +173,6 @@ export default async function MilestonePage({
                 </li>
               ))}
           </ul>
-          <Link href="/ledger" className="mt-5 inline-block text-sm font-semibold text-paypal">
-            Open the ledger
-          </Link>
         </>
       ) : (
         <p className="text-sm">{lines[milestone.state] ?? ''}</p>
@@ -214,11 +213,21 @@ export default async function MilestonePage({
           <section className="h-fit rounded-2xl bg-white p-6">
             {milestone.state === 'releasing' && <AutoRefresh everyMs={4000} />}
             {panel}
-            {submission?.replayUrl && milestone.state !== 'verifying' && (
-              <a href={submission.replayUrl} target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-paypal">
-                <Icon name="play_circle" size={18} />
-                Watch the test replay
-              </a>
+            {(showLedger || showReplay) && (
+              <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm font-semibold text-paypal">
+                {showLedger && (
+                  <Link href="/ledger" className="inline-flex items-center gap-1.5">
+                    <Icon name="receipt_long" size={18} />
+                    Open the ledger
+                  </Link>
+                )}
+                {showReplay && submission?.replayUrl && (
+                  <a href={submission.replayUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5">
+                    <Icon name="play_circle" size={18} />
+                    Watch the test replay
+                  </a>
+                )}
+              </div>
             )}
           </section>
         </div>

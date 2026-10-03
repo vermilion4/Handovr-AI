@@ -1,10 +1,11 @@
-import { and, asc, eq, inArray, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lt, or } from 'drizzle-orm';
 import { milestones, submissions, type Db } from '../db/schema';
 
 const QUIET_RUN_MS = 20 * 60 * 1000;
 const START_GRACE_MS = 60 * 1000;
 
 export async function verificationsToRun(db: Db, now: Date): Promise<string[]> {
+  const quietSince = new Date(now.getTime() - QUIET_RUN_MS);
   await db
     .update(submissions)
     .set({ status: 'queued', currentCriterionId: null, progressNote: 'The test run stopped and will start again.' })
@@ -12,7 +13,10 @@ export async function verificationsToRun(db: Db, now: Date): Promise<string[]> {
       and(
         eq(submissions.status, 'running'),
         eq(submissions.simulated, false),
-        lt(sql`coalesce(${submissions.heartbeatAt}, ${submissions.startedAt})`, new Date(now.getTime() - QUIET_RUN_MS)),
+        or(
+          lt(submissions.heartbeatAt, quietSince),
+          and(isNull(submissions.heartbeatAt), lt(submissions.startedAt, quietSince)),
+        ),
       ),
     );
 

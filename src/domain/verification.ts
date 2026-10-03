@@ -18,6 +18,12 @@ export function verificationOutcome(checks: CheckOutcome[]): 'passed' | 'failed'
   return checks.some((check) => check.kind === 'machine' && check.verdict === 'fail') ? 'failed' : 'passed';
 }
 
+/** True when the tester decided none of the automatic checks, so the run proved nothing. */
+export function allMachineUnclear(checks: CheckOutcome[]): boolean {
+  const machine = checks.filter((check) => check.kind === 'machine');
+  return machine.length > 0 && machine.every((check) => check.verdict === 'unclear');
+}
+
 export function itemsForClient(checks: CheckOutcome[]): string[] {
   return checks.filter((check) => check.kind === 'human' || check.verdict !== 'pass').map((check) => check.criterionId);
 }

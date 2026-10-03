@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  allMachineUnclear,
   checkDisplay,
   checkUrl,
   combineRuns,
@@ -139,5 +140,13 @@ describe('checkDisplay', () => {
 
   it("shows a human check as the client's call", () => {
     expect(checkDisplay({ ...base, kind: 'human', running: true })).toBe('yours');
+  });
+});
+
+describe('allMachineUnclear', () => {
+  it('is true only when there are automatic checks and the tester decided none of them', () => {
+    expect(allMachineUnclear([check('a', 'machine', 'unclear'), check('b', 'machine', 'unclear'), check('c', 'human', null)])).toBe(true);
+    expect(allMachineUnclear([check('a', 'machine', 'unclear'), check('b', 'machine', 'pass')])).toBe(false);
+    expect(allMachineUnclear([check('c', 'human', null)])).toBe(false);
   });
 });

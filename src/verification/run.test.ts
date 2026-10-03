@@ -131,15 +131,29 @@ describe('runVerification', () => {
     expect(await aiVerdicts()).toEqual({ [FORM]: 'pass', [PHONE]: 'pass', [SPEED]: 'pass' });
   });
 
-  it('leaves the checks it could not finish to the client after the last try', async () => {
+  it('sends the work back without using an attempt when the browser never works', async () => {
     const browserThatFails = (): BrowserTools => ({ ...fakeBrowser(), open: async () => { throw new Error('KERNEL is down'); } });
+    const results = [];
     for (let attempt = 0; attempt < 2; attempt++) {
-      const run = deps({}, browserThatFails());
-      await runVerification(db, run.value, submissionId);
+      results.push(await runVerification(db, deps({}, browserThatFails()).value, submissionId));
     }
+    expect(results).toEqual(['retry', 'unreachable']);
     expect(await aiVerdicts()).toEqual({ [FORM]: 'unclear', [PHONE]: 'unclear', [SPEED]: 'unclear' });
+    expect(await stateNow()).toMatchObject({ state: 'funded', attemptsUsed: 0 });
+    expect(await submissionNow()).toMatchObject({ status: 'unreachable' });
+    expect((await submissionNow()).progressNote).toContain('could not complete any of the automatic checks');
+  });
+
+  it('sends the work back when the tester could not decide any automatic check', async () => {
+    const run = deps({ [FORM]: ['unclear'], [PHONE]: ['unclear'], [SPEED]: ['unclear'] });
+    expect(await runVerification(db, run.value, submissionId)).toBe('unreachable');
+    expect(await stateNow()).toMatchObject({ state: 'funded', attemptsUsed: 0 });
+  });
+
+  it('still sends the work to the client when the tester decided at least one check', async () => {
+    const run = deps({ [FORM]: ['unclear'], [PHONE]: ['pass'], [SPEED]: ['unclear'] });
+    expect(await runVerification(db, run.value, submissionId)).toBe('passed');
     expect((await stateNow()).state).toBe('client_review');
-    expect((await submissionNow()).status).toBe('passed');
   });
 
   it('does nothing for a submission that is not queued', async () => {
