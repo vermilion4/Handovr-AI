@@ -14,6 +14,7 @@
     "db:seed": "tsx --env-file=.env.local src/db/seed.ts",
     "db:start": "LC_ALL=C pg_ctl -D .pgdata -o \"-p 5433 -c listen_addresses=localhost\" -l .pgdata/server.log start",
     "db:stop": "pg_ctl -D .pgdata stop",
+    "demo:advance": "tsx --env-file=.env.local scripts/advance.ts",
     "db:studio": "node --env-file=.env.local node_modules/drizzle-kit/bin.cjs studio"
   },
   "dependencies": {

@@ -1,6 +1,7 @@
 import type { ContractStatus, DraftStatus } from './contract';
 import type { MilestoneState } from './milestone-state';
 import { formatMoney } from './money';
+import { milestoneProgress, type Progress } from './progress';
 
 export type Role = 'client' | 'freelancer';
 
@@ -29,6 +30,8 @@ export interface ProjectSummary {
   milestoneLabel: string;
   status: { icon: string; text: string; tone: Tone };
   segments: Array<{ amountCents: number; kind: 'released' | 'held' | 'none' }>;
+  /** The steps reached by the milestone named in `milestoneLabel`, or by the last one once finished. */
+  progress: Progress | null;
   caption: string;
   actionLabel: string;
   needsViewer: boolean;
@@ -57,14 +60,14 @@ function countLabel(count: number): string {
   return count === 1 ? '1 milestone' : `${count} milestones`;
 }
 
-interface Status {
+export interface MilestoneStatus {
   icon: string;
   text: string;
   tone: Tone;
   action: string;
 }
 
-function currentStatus(milestone: SummaryMilestone, role: Role, other: string): Status {
+export function milestoneStatus(milestone: SummaryMilestone, role: Role, other: string): MilestoneStatus {
   const client = role === 'client';
   switch (milestone.state) {
     case 'drafting':
@@ -107,6 +110,12 @@ function currentStatus(milestone: SummaryMilestone, role: Role, other: string): 
       return client
         ? { icon: 'error', text: 'Funding problem, please fund again', tone: 'attention', action: 'Fix funding' }
         : { icon: 'schedule', text: `Waiting for ${other} to fix funding`, tone: 'neutral', action: 'Open' };
+    case 'cancelled':
+      return client
+        ? { icon: 'block', text: 'Cancelled. Your hold was returned and nothing was paid', tone: 'neutral', action: 'Open' }
+        : { icon: 'block', text: `Cancelled. The hold was returned to ${other}`, tone: 'neutral', action: 'Open' };
+    case 'lapsed':
+      return { icon: 'timer_off', text: 'Hold expired before the work was released. Nothing was paid', tone: 'neutral', action: 'Open' };
     default:
       return { icon: 'check_circle', text: 'Finished', tone: 'done', action: 'Open' };
   }
@@ -139,6 +148,7 @@ export function summariseProject(input: SummaryInput): ProjectSummary {
       milestoneLabel: 'No milestones yet',
       status: { icon: 'edit', text: 'Add a milestone to get started', tone: 'attention' },
       segments,
+      progress: null,
       caption: caption(role, 0, 0, 0, false),
       actionLabel: 'Open',
       needsViewer: true,
@@ -157,13 +167,14 @@ export function summariseProject(input: SummaryInput): ProjectSummary {
         tone: 'done',
       },
       segments,
+      progress: milestoneProgress(milestones[milestones.length - 1].state),
       caption: caption(role, 0, sum('released'), totalCents, true),
       actionLabel: 'Open',
       needsViewer: false,
     };
   }
 
-  const status = currentStatus(current, role, other);
+  const status = milestoneStatus(current, role, other);
   const draftingAll = current.state === 'drafting' && current.criteriaDraft !== 'ready';
 
   return {
@@ -173,6 +184,7 @@ export function summariseProject(input: SummaryInput): ProjectSummary {
       : `Milestone ${current.position} of ${milestones.length}: ${current.title}`,
     status: { icon: status.icon, text: status.text, tone: status.tone },
     segments,
+    progress: milestoneProgress(current.state),
     caption: caption(role, sum('held'), sum('released'), totalCents, false),
     actionLabel: status.action,
     needsViewer: status.tone === 'attention',

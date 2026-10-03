@@ -1,8 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import type { CriterionCategory, CriterionKind } from '../domain/criteria';
 import type { MilestoneState } from '../domain/milestone-state';
+import { holdTotalCents } from '../domain/hold';
 import { allocateShares } from '../domain/shares';
-import { criteria, criteriaVersions, milestones, projects, signatures, users, type Db } from './schema';
+import {
+  criteria,
+  criteriaVersions,
+  holds,
+  milestones,
+  paymentEvents,
+  projects,
+  signatures,
+  users,
+  type Db,
+} from './schema';
 
 export const DEMO_CLIENT_EMAIL = 'maya@chensbakery.example';
 export const DEMO_FREELANCER_EMAIL = 'tomas@riverastudio.example';
@@ -145,6 +156,68 @@ async function insertList(
   return row.id;
 }
 
+const HELD_STATES: ReadonlySet<MilestoneState> = new Set([
+  'funded',
+  'verifying',
+  'client_review',
+  'revision',
+  'settlement_proposed',
+]);
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+let demoReference = 0;
+
+/** A simulated hold and the money events that brought a seeded milestone to its state. */
+async function insertMoneyHistory(
+  db: Db,
+  milestone: { id: string; amountCents: number; state: MilestoneState; position: number },
+  projectCreatedAt: Date,
+): Promise<void> {
+  const released = milestone.state === 'released';
+  if (!released && !HELD_STATES.has(milestone.state)) return;
+
+  const reference = (kind: string) => `DEMO-${kind}-${String(++demoReference).padStart(4, '0')}`;
+  const fundedAt = new Date(projectCreatedAt.getTime() + (milestone.position * 3 - 1) * DAY_MS);
+  const releasedAt = new Date(fundedAt.getTime() + 6 * DAY_MS);
+  const totalCents = holdTotalCents(milestone.amountCents);
+  const authorizationId = reference('AUTH');
+
+  const [hold] = await db
+    .insert(holds)
+    .values({
+      milestoneId: milestone.id,
+      requestId: randomUUID(),
+      paypalOrderId: reference('ORDER'),
+      authorizationId,
+      amountCents: milestone.amountCents,
+      totalCents,
+      status: released ? 'captured' : 'active',
+      simulated: true,
+      createdAt: fundedAt,
+      authorizedAt: fundedAt,
+      expiresAt: new Date(fundedAt.getTime() + 29 * DAY_MS),
+    })
+    .returning({ id: holds.id });
+
+  const row = { milestoneId: milestone.id, holdId: hold.id, status: 'completed' as const };
+  await db.insert(paymentEvents).values([
+    { ...row, type: 'hold', amountCents: totalCents, paypalId: authorizationId, createdAt: fundedAt, updatedAt: fundedAt },
+    ...(released
+      ? [
+          { ...row, type: 'capture' as const, amountCents: totalCents, paypalId: reference('CAP'), createdAt: releasedAt, updatedAt: releasedAt },
+          {
+            ...row,
+            type: 'payout' as const,
+            amountCents: milestone.amountCents,
+            paypalId: reference('PAYOUT'),
+            createdAt: new Date(releasedAt.getTime() + 60_000),
+            updatedAt: new Date(releasedAt.getTime() + 60_000),
+          },
+        ]
+      : []),
+  ]);
+}
+
 export async function seedDemo(db: Db): Promise<{ mayaId: string; tomasId: string; lonelyId: string }> {
   const ids = new Map<string, string>();
   for (const [key, name, email, role] of PEOPLE) {
@@ -179,6 +252,7 @@ export async function seedDemo(db: Db): Promise<{ mayaId: string; tomasId: strin
       .returning();
 
     for (const milestone of milestoneRows) {
+      await insertMoneyHistory(db, milestone, new Date(project.createdAt));
       if (milestone.criteriaDraft !== 'ready') continue;
       const keys = CHECKS.map(() => randomUUID());
       const versionId = await insertList(db, milestone.id, milestone.amountCents, 1, null, '', CHECKS, keys);

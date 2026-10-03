@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/auth/current-user';
 import { ButtonLink } from '@/components/button';
 import { Icon } from '@/components/icon';
-import { MoneyBar } from '@/components/money-bar';
+import { ProgressBar } from '@/components/progress-bar';
 import { TopNav } from '@/components/top-nav';
 import { db } from '@/db/client';
 import { listProjectsForUser } from '@/db/queries/projects';
@@ -45,7 +45,7 @@ function ProjectRows({ rows }: { rows: Row[] }) {
             </p>
           </div>
           <div>
-            <MoneyBar segments={summary.segments} />
+            {summary.progress && <ProgressBar progress={summary.progress} />}
             <p className="mt-2 text-xs text-muted">{summary.caption}</p>
           </div>
           <Link href={`/projects/${id}`} className="text-sm font-semibold text-paypal md:w-28">

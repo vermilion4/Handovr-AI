@@ -1,22 +1,28 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { getCurrentUser } from '@/auth/current-user';
+import { AddressResultDialog } from '@/components/result-dialog';
 import { TopNav } from '@/components/top-nav';
 import { db } from '@/db/client';
 import { getContract } from '@/db/queries/contract';
 import { contractStatus, draftingActive } from '@/domain/contract';
 import { diffCriteria } from '@/domain/criteria';
+import { savedFeedback } from '@/domain/feedback';
 import { isUuid } from '@/domain/ids';
 import { DraftingProgress } from './drafting-progress';
 import { ReviewList, type ReviewMilestone } from './review-list';
 
 const longDate = new Intl.DateTimeFormat('en-CA', { day: 'numeric', month: 'long', year: 'numeric' });
 
-export default async function CriteriaPage({ params }: Readonly<{ params: Promise<{ projectId: string }> }>) {
+export default async function CriteriaPage({
+  params,
+  searchParams,
+}: Readonly<{ params: Promise<{ projectId: string }>; searchParams: Promise<{ saved?: string }> }>) {
   const user = await getCurrentUser();
   if (!user) redirect('/sign-in');
 
   const { projectId } = await params;
+  const { saved } = await searchParams;
   const contract = isUuid(projectId) ? await getContract(db, projectId, user.id) : null;
   if (!contract) notFound();
 
@@ -45,6 +51,9 @@ export default async function CriteriaPage({ params }: Readonly<{ params: Promis
   return (
     <>
       <TopNav user={user} active="projects" />
+      {saved && contract.milestones.some((milestone) => milestone.id === saved) && (
+        <AddressResultDialog feedback={savedFeedback(otherFirst)} next={{ label: 'Back to projects', href: '/projects' }} closeLabel="Stay here" />
+      )}
       <main className="mx-auto max-w-[1440px] px-4 pt-6 md:px-24 md:pt-8">
         <p className="text-[13px] text-muted">
           <Link href="/projects" className="hover:text-ink">

@@ -5,8 +5,10 @@ import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import { Button } from '@/components/button';
 import { Icon } from '@/components/icon';
+import { ResultDialog } from '@/components/result-dialog';
 import type { ContractStatus } from '@/domain/contract';
 import type { CriterionFields, ListDiff } from '@/domain/criteria';
+import { answeredFeedback, signedFeedback, type Feedback } from '@/domain/feedback';
 import { formatMoney } from '@/domain/money';
 import { acceptChangesAction, declineChangesAction } from './actions';
 import { SignDialog } from './sign-dialog';
@@ -58,7 +60,7 @@ export function ReviewList({
   const [expanded, setExpanded] = useState<Set<string>>(new Set(suggested.map((milestone) => milestone.id)));
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [signing, setSigning] = useState(false);
-  const [error, setError] = useState('');
+  const [feedback, setFeedback] = useState<{ result: Feedback; next?: { label: string; href: string } } | null>(null);
   const [pending, startTransition] = useTransition();
 
   const toggle = (set: Set<string>, id: string) => {
@@ -75,11 +77,14 @@ export function ReviewList({
   const humanLabel = viewer.role === 'client' ? 'You decide' : `${clientFirst} decides`;
 
   function answer(versionId: string, accepted: boolean) {
-    setError('');
     startTransition(async () => {
       const result = await (accepted ? acceptChangesAction : declineChangesAction)(projectId, versionId);
-      if (result.error) setError(result.error);
-      else router.refresh();
+      if (result.error) {
+        setFeedback({ result: { tone: 'error', title: 'That did not go through', message: result.error } });
+        return;
+      }
+      setFeedback({ result: answeredFeedback(accepted, otherFirst) });
+      router.refresh();
     });
   }
 
@@ -90,12 +95,6 @@ export function ReviewList({
           <Icon name="rate_review" size={20} />
           {otherFirst} suggested changes to {suggested.map((milestone) => milestone.title).join(' and ')}. Accept them or
           change the list again, then sign.
-        </p>
-      )}
-
-      {error && (
-        <p role="alert" className="mt-5 rounded-xl bg-fail/10 px-5 py-3 text-sm text-fail">
-          {error}
         </p>
       )}
 
@@ -269,11 +268,26 @@ export function ReviewList({
         otherFirst={otherFirst}
         today={today}
         onClose={() => setSigning(false)}
-        onSigned={() => {
+        onSigned={(outcome) => {
           setSigning(false);
           setSelected(new Set());
+          setFeedback({
+            result: signedFeedback({ ...outcome, otherFirst, viewerRole: viewer.role }),
+            next:
+              viewer.role === 'client' && outcome.completed > 0
+                ? { label: 'Go to funding', href: `/projects/${projectId}` }
+                : { label: 'Back to projects', href: '/projects' },
+          });
           router.refresh();
         }}
+      />
+
+      <ResultDialog
+        feedback={feedback?.result ?? null}
+        open={feedback !== null}
+        next={feedback?.next}
+        closeLabel={feedback?.next ? 'Stay here' : 'Close'}
+        onClose={() => setFeedback(null)}
       />
     </>
   );
