@@ -103,7 +103,7 @@ The app is live at **https://handovr-drxq.onrender.com**. It runs on PayPal's sa
 You need Node 22, pnpm and PostgreSQL, plus a PayPal developer sandbox app, an Anthropic API key and a KERNEL API key.
 
 ```bash
-git clone https://github.com/vermilion4/paypal.git handovr
+git clone https://github.com/vermilion4/Handovr-AI.git handovr
 cd handovr
 pnpm install
 cp .env.example .env.local
