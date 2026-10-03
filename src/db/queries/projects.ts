@@ -12,6 +12,7 @@ export interface MilestoneRow {
   state: MilestoneState;
   criteriaDraft: DraftStatus;
   contract: ContractStatus;
+  splitFreelancerCents: number | null;
 }
 
 export interface ProjectWithMilestones {
@@ -98,6 +99,7 @@ export async function listProjectsForUser(db: Db, userId: string): Promise<Proje
         state: m.state,
         criteriaDraft: m.criteriaDraft,
         contract: contractOf(m),
+        splitFreelancerCents: m.splitFreelancerCents,
       })),
   }));
 }

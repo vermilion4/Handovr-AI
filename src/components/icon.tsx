@@ -11,7 +11,7 @@ export function Icon({
 }) {
   return (
     <span
-      className={`material-symbols-rounded select-none leading-none ${className}`}
+      className={`material-symbols-rounded select-none leading-none ${name === 'progress_activity' ? 'motion-safe:animate-spin' : ''} ${className}`}
       style={{ fontSize: size }}
       aria-hidden={label ? undefined : true}
       aria-label={label}
